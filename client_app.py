@@ -115,7 +115,9 @@ if not df.empty:
         if sel_room: f_df = f_df[f_df['rooms'].isin(sel_room)]
         f_df['p_num'] = pd.to_numeric(f_df['price'], errors='coerce').fillna(0)
         f_df = f_df[f_df['p_num'] <= max_p]
+        f_df['date'] = pd.to_datetime(f_df['date'], errors='coerce')
         f_df = f_df.sort_values(by=['is_featured', 'date'], ascending=[False, False])
+        
 
         cols = st.columns(3)
         for i, (idx, row) in enumerate(f_df.iterrows()):
