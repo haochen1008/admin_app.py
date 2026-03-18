@@ -100,40 +100,51 @@ if not df.empty:
     tabs = st.tabs(["🏠 房源精选", "🛠️ 我们的服务", "👤 关于我们", "📞 联系方式"])
     
     # --- TAB 1: 房源精选 ---
+    # --- TAB 1: 房源精选 ---
     with tabs[0]:
-        with st.expander("🔍 筛选与搜索房源", expanded=False):
+        # 1. 顶部筛选器与排序器
+        with st.expander("🔍 筛选与高级排序", expanded=False):
             search_q = st.text_input("输入楼盘、地铁站关键词...", "").lower()
+            
             f1, f2, f3 = st.columns(3)
             sel_reg = f1.multiselect("区域", options=sorted(df['region'].unique()))
             sel_room = f2.multiselect("户型", options=sorted(df['rooms'].unique()))
             max_p = f3.slider("预算上限 (£)", 1000, 15000, 15000)
+            
+            st.markdown("---")
+            # 新增：排序控制列
+            s1, s2 = st.columns(2)
+            sort_by = s1.selectbox("排序维度", ["发布时间", "租金价格"])
+            sort_order = s2.selectbox("排序方式", ["从高到低 (Newest/Highest)", "从低到高 (Oldest/Lowest)"])
         
         f_df = df.copy()
 
-        # 1. 过滤逻辑
+        # 2. 基础过滤
         if search_q:
             f_df = f_df[f_df['title'].str.lower().str.contains(search_q) | f_df['description'].str.lower().str.contains(search_q)]
         if sel_reg: f_df = f_df[f_df['region'].isin(sel_reg)]
         if sel_room: f_df = f_df[f_df['rooms'].isin(sel_room)]
         
+        # 转换租金为数字
         f_df['p_num'] = pd.to_numeric(f_df['price'], errors='coerce').fillna(0)
         f_df = f_df[f_df['p_num'] <= max_p]
 
-        # 2. 【核心修复】日期与置顶排序逻辑
-        # 强制转换日期格式，无法解析的设为 NaT (Not a Time)
+        # 转换日期格式 (核心修复)
         f_df['date'] = pd.to_datetime(f_df['date'], errors='coerce')
         
-        # 确保 is_featured 列是数字类型 (防止字符串干扰排序)
-        f_df['is_featured'] = pd.to_numeric(f_df['is_featured'], errors='coerce').fillna(0)
+        # 3. 执行用户自定义排序
+        is_asc = (sort_order == "从低到高 (Oldest/Lowest)")
+        
+        if sort_by == "发布时间":
+            # 始终保持 is_featured 置顶，然后根据日期排序
+            f_df = f_df.sort_values(by=['is_featured', 'date'], ascending=[False, is_asc])
+        else:
+            # 始终保持 is_featured 置顶，然后根据价格排序
+            f_df = f_df.sort_values(by=['is_featured', 'p_num'], ascending=[False, is_asc])
 
-        # 执行双重排序：
-        # 第一权重：is_featured (1在前，0在后)
-        # 第二权重：date (最新日期在前)
-        f_df = f_df.sort_values(by=['is_featured', 'date'], ascending=[False, False])
-
-        # 3. 渲染房源
+        # 4. 渲染房源
+        st.markdown(f"共有 **{len(f_df)}** 套符合条件的房源")
         cols = st.columns(3)
-        # 使用 reset_index 确保循环时的 key 不会冲突
         for i, (idx, row) in enumerate(f_df.iterrows()):
             with cols[i % 3]:
                 with st.container(border=True):
@@ -142,12 +153,13 @@ if not df.empty:
                     st.markdown(f'<div class="prop-title">{row["title"]}</div>', unsafe_allow_html=True)
                     st.markdown(f'<div class="prop-price">£{row["price"]} /mo</div>', unsafe_allow_html=True)
                     
-                    # 格式化显示日期，如果日期无效则显示“近期”
-                    date_str = row['date'].strftime('%Y-%m-%d') if pd.notnull(row['date']) else "近期"
-                    st.markdown(f'<div class="prop-date">📍 {row["region"]} | 🗓️ {date_str}</div>', unsafe_allow_html=True)
+                    # 格式化显示日期
+                    d_val = row['date'].strftime('%Y-%m-%d') if pd.notnull(row['date']) else "近期"
+                    st.markdown(f'<div class="prop-date">📍 {row["region"]} | 🗓️ {d_val}</div>', unsafe_allow_html=True)
                     
                     if st.button("详情", key=f"btn_{idx}_{i}", use_container_width=True):
                         show_details(row, worksheet, idx + 2)
+                        
     # --- TAB 2: 我们的服务 (完全还原你的原始文案) ---
     with tabs[1]:
         st.markdown("### 🛠️ 全生命周期管家式关怀")
