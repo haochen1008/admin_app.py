@@ -109,17 +109,31 @@ if not df.empty:
             max_p = f3.slider("预算上限 (£)", 1000, 15000, 15000)
         
         f_df = df.copy()
+
+        # 1. 过滤逻辑
         if search_q:
             f_df = f_df[f_df['title'].str.lower().str.contains(search_q) | f_df['description'].str.lower().str.contains(search_q)]
         if sel_reg: f_df = f_df[f_df['region'].isin(sel_reg)]
         if sel_room: f_df = f_df[f_df['rooms'].isin(sel_room)]
+        
         f_df['p_num'] = pd.to_numeric(f_df['price'], errors='coerce').fillna(0)
         f_df = f_df[f_df['p_num'] <= max_p]
-        f_df['date'] = pd.to_datetime(f_df['date'], errors='coerce')
-        f_df = f_df.sort_values(by=['is_featured', 'date'], ascending=[False, False])
-        
 
+        # 2. 【核心修复】日期与置顶排序逻辑
+        # 强制转换日期格式，无法解析的设为 NaT (Not a Time)
+        f_df['date'] = pd.to_datetime(f_df['date'], errors='coerce')
+        
+        # 确保 is_featured 列是数字类型 (防止字符串干扰排序)
+        f_df['is_featured'] = pd.to_numeric(f_df['is_featured'], errors='coerce').fillna(0)
+
+        # 执行双重排序：
+        # 第一权重：is_featured (1在前，0在后)
+        # 第二权重：date (最新日期在前)
+        f_df = f_df.sort_values(by=['is_featured', 'date'], ascending=[False, False])
+
+        # 3. 渲染房源
         cols = st.columns(3)
+        # 使用 reset_index 确保循环时的 key 不会冲突
         for i, (idx, row) in enumerate(f_df.iterrows()):
             with cols[i % 3]:
                 with st.container(border=True):
@@ -127,10 +141,13 @@ if not df.empty:
                     if p_url: st.image(p_url, use_container_width=True)
                     st.markdown(f'<div class="prop-title">{row["title"]}</div>', unsafe_allow_html=True)
                     st.markdown(f'<div class="prop-price">£{row["price"]} /mo</div>', unsafe_allow_html=True)
-                    st.markdown(f'<div class="prop-date">📍 {row["region"]} | 🗓️ {row.get("date", "近期")}</div>', unsafe_allow_html=True)
-                    if st.button("详情", key=f"btn_{idx}", use_container_width=True):
+                    
+                    # 格式化显示日期，如果日期无效则显示“近期”
+                    date_str = row['date'].strftime('%Y-%m-%d') if pd.notnull(row['date']) else "近期"
+                    st.markdown(f'<div class="prop-date">📍 {row["region"]} | 🗓️ {date_str}</div>', unsafe_allow_html=True)
+                    
+                    if st.button("详情", key=f"btn_{idx}_{i}", use_container_width=True):
                         show_details(row, worksheet, idx + 2)
-
     # --- TAB 2: 我们的服务 (完全还原你的原始文案) ---
     with tabs[1]:
         st.markdown("### 🛠️ 全生命周期管家式关怀")
