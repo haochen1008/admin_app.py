@@ -169,7 +169,7 @@ def create_poster(files, title, price, rooms, region="伦敦"):
 # --- 5. 主程序逻辑 ---
 ws = get_ws()
 if ws:
-    t1, t2 = st.tabs(["✨ 发布新房源", "⚙️ 管理与统计"])
+    t1, t2, t3 = st.tabs(["✨ 发布新房源", "⚙️ 管理与统计", "🚀 批量发送引擎"])
     
     with t1:
         st.subheader("1. 基础信息")
@@ -243,7 +243,26 @@ if ws:
         data = ws.get_all_records()
         if data:
             df = pd.DataFrame(data)
-            st.metric("累计访问量", int(pd.to_numeric(df['views'], errors='coerce').sum()))
+            
+            # --- 增加大盘 (Executive Dashboard) ---
+            st.markdown("### 📊 排行榜与数据引擎 (Executive Dashboard)")
+            metric_cols = st.columns(3)
+            metric_cols[0].metric("累计访问量", int(pd.to_numeric(df['views'], errors='coerce').sum()))
+            metric_cols[1].metric("在租房源数", len(df))
+            metric_cols[2].metric("精选置顶数", len(df[df.get('is_featured', 0) == 1]))
+            
+            # 图表
+            c_d1, c_d2 = st.columns(2)
+            with c_d1:
+                st.markdown("**各区域热度分布**")
+                reg_views = df.groupby('region')['views'].sum().reset_index()
+                st.bar_chart(reg_views.set_index('region'))
+            with c_d2:
+                st.markdown("**最受关注户型**")
+                room_views = df.groupby('rooms')['views'].sum().reset_index()
+                st.bar_chart(room_views.set_index('rooms'))
+            
+            st.markdown("---")
             search = st.text_input("🔍 快速搜索房源...").lower()
             f_df = df[df['title'].astype(str).str.lower().str.contains(search)] if search else df
             
@@ -254,8 +273,9 @@ if ws:
                         ca, cb, cc, cd = st.columns(4)
                         nt = ca.text_input("标题", row['title'])
                         np = cb.number_input("价格", value=int(float(row['price'] or 0)))
-                        nr = cc.selectbox("区域", ["中伦敦", "东伦敦", "西伦敦", "北伦敦", "南伦敦"], index=0)
-                        nrm = cd.selectbox("户型", ["Studio", "1房", "2房", "3房", "4房+"], index=0)
+                        nr = cc.selectbox("区域", ["中伦敦", "东伦敦", "西伦敦", "北伦敦", "南伦敦"], index=["中伦敦", "东伦敦", "西伦敦", "北伦敦", "南伦敦"].index(row['region']) if row['region'] in ["中伦敦", "东伦敦", "西伦敦", "北伦敦", "南伦敦"] else 0)
+                        nrm_opts = ["Studio", "1房", "2房", "3房", "4房+"]
+                        nrm = cd.selectbox("户型", nrm_opts, index=nrm_opts.index(row['rooms']) if row['rooms'] in nrm_opts else 0)
                         nd = st.text_area("文案", value=row['description'], height=100)
                         isf = st.checkbox("精选置顶", value=bool(row.get('is_featured', 0)))
                         
@@ -266,3 +286,69 @@ if ws:
                         if s2.form_submit_button("删除"):
                             ws.delete_rows(idx)
                             st.rerun()
+                    
+                    # --- Multi-version Copywriting ---
+                    st.markdown("💬 **一键私域营销话术**")
+                    moments_txt = f"🌟【{row['region']} VIP新盘首发】\n🏢 {row['title']}\n🛏️ {row['rooms']} | 💰 {row['price']}/月\n\n稀缺奢华好房，带有专属设施服务。\n欢迎私信获取完整高清相册及看房名额！"
+                    dm_txt = f"哈喽～给您推荐一套在{row['region']}的【{row['title']}】！\n这个是{row['rooms']}，目前租金是 {row['price']}/月。性价比非常高！\n您看下主页这个房源的海报跟详情，如果感兴趣咱们可以随时安排看房哦！"
+                    c_m1, c_m2 = st.columns(2)
+                    c_m1.text_area("朋友圈高冷名片版", value=moments_txt, height=130, key=f"mom_{idx}")
+                    c_m2.text_area("微信亲和私聊版", value=dm_txt, height=130, key=f"dm_{idx}")
+
+    with t3:
+        st.subheader("🚀 批量印钞机 (Bulk Scraper Engine)")
+        st.info("💡 批量粘贴 Rightmove 链接，去泡杯咖啡，系统会为您自动抓取图片、排版海报上云、AI写文案，并在后台静默发房！")
+        bulk_urls = st.text_area("输入 Rightmove 链接 (每行一个)", height=200, placeholder="https://www.rightmove.co.uk/properties/12345...\nhttps://www.rightmove.co.uk/properties/67890...")
+        
+        b_c1, b_c2 = st.columns(2)
+        bulk_reg = b_c1.selectbox("统一默认区域", ["中伦敦", "东伦敦", "西伦敦", "北伦敦", "南伦敦"])
+        bulk_room_opts = ["Studio", "1房", "2房", "3房", "4房+"]
+        bulk_room = b_c2.selectbox("降级默认户型 (抓取不到时的回退值)", bulk_room_opts, index=2)
+        
+        if st.button("⚡ 开始批量全自动处理 (Start Bulk Process)", type="primary"):
+            urls = [u.strip() for u in bulk_urls.split('\n') if u.strip().startswith('http')]
+            if not urls:
+                st.warning("您还没有输入任何链接哦！")
+            else:
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                success_count = 0
+                
+                for i, url in enumerate(urls):
+                    status_text.text(f"正在处理 ({i+1}/{len(urls)}): {url}")
+                    data, err = scrape_rightmove(url)
+                    if data and not err:
+                        # Fetch images
+                        files_to_use = []
+                        for img_url in data.get('images', []):
+                            try:
+                                r_img = requests.get(img_url, timeout=10)
+                                if r_img.status_code == 200:
+                                    files_to_use.append(BytesIO(r_img.content))
+                            except: pass
+                        
+                        if files_to_use:
+                            rooms = data.get('rooms', bulk_room)
+                            if rooms not in bulk_room_opts: rooms = bulk_room
+                            # Create Poster
+                            p_poster = create_poster(files_to_use, data['title'], data['price'], rooms, bulk_reg)
+                            if p_poster:
+                                try:
+                                    buf = BytesIO()
+                                    p_poster.save(buf, format="JPEG", quality=90)
+                                    up_res = cloudinary.uploader.upload(buf.getvalue())
+                                    img_url_cloud = up_res['secure_url']
+                                    
+                                    # AI Copy
+                                    ai_copy = call_smart_ai(data['description'][:1000]) if data['description'] else "最新豪宅首发，欢迎详询！"
+                                    
+                                    # Write DB
+                                    now = datetime.now().strftime("%Y-%m-%d")
+                                    ws.append_row([now, data['title'], bulk_reg, rooms, int(data['price']), img_url_cloud, ai_copy, 0, 0])
+                                    success_count += 1
+                                except Exception as e:
+                                    st.error(f"处理 {url} 时出错: {e}")
+                    
+                    progress_bar.progress((i + 1) / len(urls))
+                
+                status_text.success(f"🎉 跑完啦！成功录入 {success_count} 套高级源。去客户端看看吧！")
