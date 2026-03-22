@@ -6,8 +6,11 @@ from PIL import Image, ImageDraw, ImageFont
 import cloudinary
 import cloudinary.uploader
 import requests
+import json
+import re
 from io import BytesIO
 from datetime import datetime
+
 
 # --- 1. 初始化配置 ---
 cloudinary.config(
@@ -51,6 +54,48 @@ def call_smart_ai(text):
             headers={"Authorization": f"Bearer {api_key}"}, timeout=25)
         return r.json()['choices'][0]['message']['content'].replace("**", "")
     except: return "✓ 解析失败，请手动修改"
+
+def scrape_rightmove(url):
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-GB,en;q=0.9'
+    }
+    try:
+        if not url or "rightmove.co.uk" not in url:
+            return None, "无效的 Rightmove 链接"
+        res = requests.get(url, headers=headers, timeout=15)
+        res.raise_for_status()
+        html = res.text
+        if 'window.PAGE_MODEL = ' in html:
+            page_model_raw = html.split('window.PAGE_MODEL = ')[1].split('</script>')[0].strip()
+            end_idx = page_model_raw.find('};')
+            if end_idx != -1: page_model_raw = page_model_raw[:end_idx + 1]
+            else:
+                last_brace = page_model_raw.rfind('}')
+                if last_brace != -1: page_model_raw = page_model_raw[:last_brace + 1]
+            
+            data = json.loads(page_model_raw)
+            p_data = data.get('propertyData', {})
+            if p_data:
+                title = p_data.get('text', {}).get('pageTitle', '')
+                price_str = p_data.get('prices', {}).get('primaryPrice', '')
+                try: price = int(re.sub(r'[^\d]', '', price_str))
+                except: price = 0
+                desc_html = p_data.get('text', {}).get('description', '')
+                desc = re.sub(r'<[^>]+>', '', desc_html).strip()
+                bedrooms = p_data.get('bedrooms', 0)
+                if bedrooms == 0: rooms_str = "Studio"
+                elif bedrooms >= 4: rooms_str = "4房+"
+                else: rooms_str = f"{bedrooms}房"
+                images = [img.get('url') for img in p_data.get('images', []) if img.get('url')]
+                
+                return {
+                    'title': title, 'price': price, 'rooms': rooms_str, 'description': desc, 'images': images[:6]
+                }, None
+        return None, "无法解析数据，请检查链接是否为房源页"
+    except Exception as e:
+        return None, f"抓取失败: {e}"
 
 # --- 4. 核心：海报引擎 (仅修改 display_text 拼接) ---
 def create_poster(files, title, price, rooms):
@@ -109,22 +154,57 @@ if ws:
     
     with t1:
         st.subheader("1. 基础信息")
-        c1, c2, c3, c4 = st.columns(4)
-        p_name = c1.text_input("房源名称")
-        p_price = c2.number_input("月租 (£)", min_value=0)
-        p_reg = c3.selectbox("区域", ["中伦敦", "东伦敦", "西伦敦", "北伦敦", "南伦敦"])
-        p_rooms = c4.selectbox("户型", ["Studio", "1房", "2房", "3房", "4房+"])
         
-        en_desc = st.text_area("英文原始描述")
+        # --- Rightmove 读取模块 ---
+        rm_url = st.text_input("🔗 自动读取 Rightmove 链接 (选填，自动填入房源信息及图片)")
+        if st.button("🔍 一键读取 Rightmove"):
+            if rm_url:
+                with st.spinner("正在抓取 Rightmove 数据，请稍候..."):
+                    data, err = scrape_rightmove(rm_url)
+                    if err:
+                        st.error(err)
+                    else:
+                        st.session_state['rm_data'] = data
+                        st.success("✅ 读取成功！请复核下方自动填充的信息。")
+            else:
+                st.warning("请输入 Rightmove 链接")
+        
+        rm_data = st.session_state.get('rm_data', {})
+        
+        c1, c2, c3, c4 = st.columns(4)
+        p_name = c1.text_input("房源名称", value=rm_data.get('title', ''))
+        p_price = c2.number_input("月租 (£)", min_value=0, value=rm_data.get('price', 0))
+        p_reg = c3.selectbox("区域", ["中伦敦", "东伦敦", "西伦敦", "北伦敦", "南伦敦"])
+        
+        rooms_opts = ["Studio", "1房", "2房", "3房", "4房+"]
+        default_room = rm_data.get('rooms', "2房")
+        idx_room = rooms_opts.index(default_room) if default_room in rooms_opts else 2
+        p_rooms = c4.selectbox("户型", rooms_opts, index=idx_room)
+        
+        en_desc = st.text_area("英文原始描述", value=rm_data.get('description', ''))
         if st.button("🪄 AI 生成中文文案"):
             st.session_state['zh_content'] = call_smart_ai(en_desc)
         
         zh_desc = st.text_area("最终展示描述", value=st.session_state.get('zh_content', ''), height=150)
-        up_imgs = st.file_uploader("上传房源图 (建议6张)", accept_multiple_files=True)
+        up_imgs = st.file_uploader("上传房源图 (建议6张, 将覆盖自动抓取的图片)", accept_multiple_files=True)
         
-        if up_imgs:
+        # 准备合并图片来源
+        files_to_use = up_imgs
+        rm_image_urls = rm_data.get('images', [])
+        
+        if not files_to_use and rm_image_urls:
+            files_to_use = []
+            for img_url in rm_image_urls:
+                try:
+                    r_img = requests.get(img_url, timeout=10)
+                    if r_img.status_code == 200:
+                        files_to_use.append(BytesIO(r_img.content))
+                except:
+                    pass
+        
+        if files_to_use:
             # 修改点：这里传入了 p_rooms 给海报引擎
-            preview_img = create_poster(up_imgs, p_name, p_price, p_rooms)
+            preview_img = create_poster(files_to_use, p_name, p_price, p_rooms)
             if preview_img:
                 st.image(preview_img, caption="双水印强化海报预览", width=450)
                 
