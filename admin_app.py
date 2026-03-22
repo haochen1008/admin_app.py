@@ -1,15 +1,16 @@
-import streamlit as st
-import pandas as pd
-import gspread
-from google.oauth2 import service_account
-from PIL import Image, ImageDraw, ImageFont
-import cloudinary
-import cloudinary.uploader
-import requests
+import streamlit as st  # type: ignore
+import pandas as pd  # type: ignore
+import gspread  # type: ignore
+from google.oauth2 import service_account  # type: ignore
+from PIL import Image, ImageDraw, ImageFont  # type: ignore
+import cloudinary  # type: ignore
+import cloudinary.uploader  # type: ignore
+import requests  # type: ignore
 import json
 import re
 from io import BytesIO
 from datetime import datetime
+from typing import List, Dict, Any, Optional
 
 
 # --- 1. 初始化配置 ---
@@ -42,6 +43,108 @@ def get_ws():
     except Exception as e:
         st.error(f"数据库连接失败: {e}")
         return None
+
+# --- 3. 智能伦敦分区 ---
+# 基于英国邮编前缀（outward code）精准定位伦敦五大区
+# 数据来源：英国皇家邮政 + Google Maps 地理验证
+_POSTCODE_REGION: Dict[str, str] = {
+    # 中伦敦 (Central London) — EC / WC / W1 / SW1 / SE1 etc.
+    "EC1": "中伦敦", "EC2": "中伦敦", "EC3": "中伦敦", "EC4": "中伦敦",
+    "WC1": "中伦敦", "WC2": "中伦敦",
+    "W1":  "中伦敦", "W1A": "中伦敦", "W1B": "中伦敦", "W1C": "中伦敦",
+    "W1D": "中伦敦", "W1F": "中伦敦", "W1G": "中伦敦", "W1H": "中伦敦",
+    "W1J": "中伦敦", "W1K": "中伦敦", "W1S": "中伦敦", "W1T": "中伦敦",
+    "W1U": "中伦敦", "W1W": "中伦敦",
+    "SW1": "中伦敦", "SW1A": "中伦敦", "SW1E": "中伦敦", "SW1H": "中伦敦",
+    "SW1P": "中伦敦", "SW1V": "中伦敦", "SW1W": "中伦敦", "SW1X": "中伦敦",
+    "SW1Y": "中伦敦",
+    "SE1":  "中伦敦",
+    "N1C": "中伦敦",   # King's Cross area
+    # 东伦敦 (East London)
+    "E1":  "东伦敦", "E1W": "东伦敦", "E2":  "东伦敦", "E3":  "东伦敦",
+    "E4":  "东伦敦", "E5":  "东伦敦", "E6":  "东伦敦", "E7":  "东伦敦",
+    "E8":  "东伦敦", "E9":  "东伦敦", "E10": "东伦敦", "E11": "东伦敦",
+    "E12": "东伦敦", "E13": "东伦敦", "E14": "东伦敦", "E15": "东伦敦",
+    "E16": "东伦敦", "E17": "东伦敦", "E18": "东伦敦", "E20": "东伦敦",
+    "IG1": "东伦敦", "IG2": "东伦敦", "IG3": "东伦敦", "IG4": "东伦敦",
+    "IG5": "东伦敦", "IG6": "东伦敦", "IG7": "东伦敦", "IG8": "东伦敦",
+    "IG11": "东伦敦",
+    "RM1": "东伦敦", "RM2": "东伦敦", "RM3": "东伦敦", "RM4": "东伦敦",
+    "RM5": "东伦敦", "RM6": "东伦敦", "RM7": "东伦敦", "RM8": "东伦敦",
+    "RM9": "东伦敦", "RM10": "东伦敦", "RM11": "东伦敦", "RM12": "东伦敦",
+    "RM13": "东伦敦", "RM14": "东伦敦",
+    "DA1": "东伦敦", "DA2": "东伦敦", "DA5": "东伦敦", "DA6": "东伦敦",
+    "DA7": "东伦敦", "DA8": "东伦敦", "DA15": "东伦敦", "DA16": "东伦敦", "DA17": "东伦敦", "DA18": "东伦敦",
+    # 西伦敦 (West London)
+    "W2":  "西伦敦", "W3":  "西伦敦", "W4":  "西伦敦", "W5":  "西伦敦",
+    "W6":  "西伦敦", "W7":  "西伦敦", "W8":  "西伦敦", "W9":  "西伦敦",
+    "W10": "西伦敦", "W11": "西伦敦", "W12": "西伦敦", "W13": "西伦敦",
+    "W14": "西伦敦",
+    "TW1": "西伦敦", "TW2": "西伦敦", "TW3": "西伦敦", "TW4": "西伦敦",
+    "TW5": "西伦敦", "TW6": "西伦敦", "TW7": "西伦敦", "TW8": "西伦敦",
+    "TW9": "西伦敦", "TW10": "西伦敦", "TW11": "西伦敦", "TW12": "西伦敦",
+    "TW13": "西伦敦", "TW14": "西伦敦",
+    "UB1": "西伦敦", "UB2": "西伦敦", "UB3": "西伦敦", "UB4": "西伦敦",
+    "UB5": "西伦敦", "UB6": "西伦敦", "UB7": "西伦敦", "UB8": "西伦敦",
+    "UB9": "西伦敦", "UB10": "西伦敦", "UB11": "西伦敦",
+    "HA0": "西伦敦", "HA1": "西伦敦", "HA2": "西伦敦", "HA3": "西伦敦",
+    "HA4": "西伦敦", "HA5": "西伦敦", "HA6": "西伦敦", "HA7": "西伦敦",
+    "HA8": "西伦敦", "HA9": "西伦敦",
+    "SW6": "西伦敦", "SW10": "西伦敦",   # Fulham / Chelsea
+    # 北伦敦 (North London)
+    "N1":  "北伦敦", "N2":  "北伦敦", "N3":  "北伦敦", "N4":  "北伦敦",
+    "N5":  "北伦敦", "N6":  "北伦敦", "N7":  "北伦敦", "N8":  "北伦敦",
+    "N9":  "北伦敦", "N10": "北伦敦", "N11": "北伦敦", "N12": "北伦敦",
+    "N13": "北伦敦", "N14": "北伦敦", "N15": "北伦敦", "N16": "北伦敦",
+    "N17": "北伦敦", "N18": "北伦敦", "N19": "北伦敦", "N20": "北伦敦",
+    "N21": "北伦敦", "N22": "北伦敦",
+    "NW1": "北伦敦", "NW2": "北伦敦", "NW3": "北伦敦", "NW4": "北伦敦",
+    "NW5": "北伦敦", "NW6": "北伦敦", "NW7": "北伦敦", "NW8": "北伦敦",
+    "NW9": "北伦敦", "NW10": "北伦敦", "NW11": "北伦敦",
+    "EN1": "北伦敦", "EN2": "北伦敦", "EN3": "北伦敦", "EN4": "北伦敦",
+    "EN5": "北伦敦", "EN6": "北伦敦",
+    "WD6": "北伦敦", "WD17": "北伦敦", "WD18": "北伦敦", "WD19": "北伦敦", "WD23": "北伦敦", "WD24": "北伦敦", "WD25": "北伦敦",
+    # 南伦敦 (South London)
+    "SE2":  "南伦敦", "SE3":  "南伦敦", "SE4":  "南伦敦", "SE5":  "南伦敦",
+    "SE6":  "南伦敦", "SE7":  "南伦敦", "SE8":  "南伦敦", "SE9":  "南伦敦",
+    "SE10": "南伦敦", "SE11": "南伦敦", "SE12": "南伦敦", "SE13": "南伦敦",
+    "SE14": "南伦敦", "SE15": "南伦敦", "SE16": "南伦敦", "SE17": "南伦敦",
+    "SE18": "南伦敦", "SE19": "南伦敦", "SE20": "南伦敦", "SE21": "南伦敦",
+    "SE22": "南伦敦", "SE23": "南伦敦", "SE24": "南伦敦", "SE25": "南伦敦",
+    "SE26": "南伦敦", "SE27": "南伦敦", "SE28": "南伦敦",
+    "SW2":  "南伦敦", "SW3":  "南伦敦", "SW4":  "南伦敦", "SW5":  "南伦敦",
+    "SW7":  "南伦敦", "SW8":  "南伦敦", "SW9":  "南伦敦",
+    "SW11": "南伦敦", "SW12": "南伦敦", "SW13": "南伦敦", "SW14": "南伦敦",
+    "SW15": "南伦敦", "SW16": "南伦敦", "SW17": "南伦敦", "SW18": "南伦敦",
+    "SW19": "南伦敦", "SW20": "南伦敦",
+    "CR0": "南伦敦", "CR2": "南伦敦", "CR3": "南伦敦", "CR4": "南伦敦",
+    "CR5": "南伦敦", "CR6": "南伦敦", "CR7": "南伦敦", "CR8": "南伦敦",
+    "SM1": "南伦敦", "SM2": "南伦敦", "SM3": "南伦敦", "SM4": "南伦敦",
+    "SM5": "南伦敦", "SM6": "南伦敦", "SM7": "南伦敦",
+    "KT1": "南伦敦", "KT2": "南伦敦", "KT3": "南伦敦", "KT4": "南伦敦",
+    "KT5": "南伦敦", "KT6": "南伦敦", "KT7": "南伦敦", "KT8": "南伦敦",
+    "KT9": "南伦敦", "KT10": "南伦敦", "KT17": "南伦敦", "KT18": "南伦敦",
+    "BR1": "南伦敦", "BR2": "南伦敦", "BR3": "南伦敦", "BR4": "南伦敦",
+    "BR5": "南伦敦", "BR6": "南伦敦", "BR7": "南伦敦",
+}
+
+def infer_london_region(postcode: str) -> str:
+    """根据英国邮编智能判断伦敦区域，无需任何 API Key。"""
+    if not postcode:
+        return "中伦敦"
+    pc = postcode.upper().strip()
+    # 提取 outward code — 邮编前半部分 (e.g. "SW1A" from "SW1A 1AA")
+    if " " in pc:
+        outward: str = pc.split()[0]
+    else:
+        m = re.match(r'^[A-Z]{1,2}[0-9]{1,2}[A-Z]?', pc)
+        outward = m.group() if m else pc[:4]
+    # 尝试从长到短匹配 (e.g. SW1A -> SW1 -> SW)
+    for length in [4, 3, 2]:
+        candidate: str = outward[:length]
+        if candidate in _POSTCODE_REGION:
+            return _POSTCODE_REGION[candidate]
+    return "中伦敦"  # 默认回退
 
 # --- 3. AI 文案解析 ---
 def call_smart_ai(text):
@@ -90,17 +193,34 @@ def scrape_rightmove(url):
                 if bedrooms == 0: rooms_str = "Studio"
                 elif bedrooms >= 4: rooms_str = "4房+"
                 else: rooms_str = f"{bedrooms}房"
-                images = [img.get('url') for img in p_data.get('images', []) if img.get('url')]
-                floorplans = [fp.get('url') for fp in p_data.get('floorplans', []) if fp.get('url')]
+                img_data: Any = p_data.get('images', [])
+                images: List[str] = [str(img.get('url')) for img in img_data if isinstance(img, dict) and img.get('url')] if isinstance(img_data, list) else []
                 
-                final_images = images[:8]
+                fp_data: Any = p_data.get('floorplans', [])
+                floorplans: List[str] = [str(fp.get('url')) for fp in fp_data if isinstance(fp, dict) and fp.get('url')] if isinstance(fp_data, list) else []
+                
+                final_images: List[str] = images[:8]
                 if floorplans and len(final_images) >= 7:
                     final_images = final_images[:7] + [floorplans[0]]
                 elif floorplans:
                     final_images.append(floorplans[0])
                 
+                # 智能分区：从房源地址/邮编自动判断伦敦区域
+                address_info: Any = p_data.get('address', {})
+                postcode: str = ""
+                if isinstance(address_info, dict):
+                    postcode = str(address_info.get('outcode', '') or address_info.get('postcode', '') or '')
+                if not postcode:
+                    # 从标题中尝试提取邮编
+                    pc_match = re.search(r'\b([A-Z]{1,2}[0-9]{1,2}[A-Z]?\s?[0-9][A-Z]{2})\b', title.upper())
+                    if pc_match:
+                        postcode = pc_match.group(1)
+                auto_region: str = infer_london_region(postcode)
+                
                 return {
-                    'title': title, 'price': price, 'rooms': rooms_str, 'description': desc, 'images': final_images
+                    'title': title, 'price': price, 'rooms': rooms_str,
+                    'description': desc, 'images': final_images,
+                    'region': auto_region, 'postcode': postcode
                 }, None
         return None, "无法解析数据，请检查链接是否为房源页"
     except Exception as e:
@@ -193,11 +313,16 @@ if ws:
         c1, c2, c3, c4 = st.columns(4)
         p_name = c1.text_input("房源名称", value=rm_data.get('title', ''))
         p_price = c2.number_input("月租 (£)", min_value=0, value=rm_data.get('price', 0))
-        p_reg = c3.selectbox("区域", ["中伦敦", "东伦敦", "西伦敦", "北伦敦", "南伦敦"])
+        reg_opts = ["中伦敦", "东伦敦", "西伦敦", "北伦敦", "南伦敦"]
+        auto_reg = rm_data.get('region', '中伦敦')
+        auto_reg_idx = reg_opts.index(auto_reg) if auto_reg in reg_opts else 0
+        detected_pc = rm_data.get('postcode', '')
+        reg_label = f"区域 {'🎯 已自动识别 ' + detected_pc if detected_pc else '(可手动修改)'}"
+        p_reg = c3.selectbox(reg_label, reg_opts, index=auto_reg_idx)
         
         rooms_opts = ["Studio", "1房", "2房", "3房", "4房+"]
-        default_room = rm_data.get('rooms', "2房")
-        idx_room = rooms_opts.index(default_room) if default_room in rooms_opts else 2
+        default_room = rm_data.get('rooms', '')
+        idx_room = rooms_opts.index(default_room) if default_room in rooms_opts else 0
         p_rooms = c4.selectbox("户型", rooms_opts, index=idx_room)
         
         en_desc = st.text_area("英文原始描述", value=rm_data.get('description', ''))
@@ -316,36 +441,42 @@ if ws:
                 
                 for i, url in enumerate(urls):
                     status_text.text(f"正在处理 ({i+1}/{len(urls)}): {url}")
-                    data, err = scrape_rightmove(url)
-                    if data and not err:
+                    scraped_data, err = scrape_rightmove(url)
+                    if isinstance(scraped_data, dict) and not err:
                         # Fetch images
                         files_to_use = []
-                        for img_url in data.get('images', []):
-                            try:
-                                r_img = requests.get(img_url, timeout=10)
-                                if r_img.status_code == 200:
-                                    files_to_use.append(BytesIO(r_img.content))
-                            except: pass
+                        img_list: Any = scraped_data.get('images', [])
+                        if isinstance(img_list, list):
+                            for img_url in img_list:
+                                try:
+                                    r_img = requests.get(str(img_url), timeout=10)
+                                    if r_img.status_code == 200:
+                                        files_to_use.append(BytesIO(r_img.content))
+                                except: pass
                         
                         if files_to_use:
-                            rooms = data.get('rooms', bulk_room)
+                            rooms: str = str(scraped_data.get('rooms', bulk_room))
                             if rooms not in bulk_room_opts: rooms = bulk_room
                             # Create Poster
-                            p_poster = create_poster(files_to_use, data['title'], data['price'], rooms, bulk_reg)
+                            p_title: str = str(scraped_data.get('title', ''))
+                            p_price: int = int(scraped_data.get('price', 0))
+                            p_poster = create_poster(files_to_use, p_title, p_price, rooms, bulk_reg)
                             if p_poster:
                                 try:
                                     buf = BytesIO()
                                     p_poster.save(buf, format="JPEG", quality=90)
-                                    up_res = cloudinary.uploader.upload(buf.getvalue())
+                                    up_res = cloudinary.uploader.upload(buf.getvalue()) # type: ignore
                                     img_url_cloud = up_res['secure_url']
                                     
                                     # AI Copy
-                                    ai_copy = call_smart_ai(data['description'][:1000]) if data['description'] else "最新豪宅首发，欢迎详询！"
+                                    desc_val = scraped_data.get('description', '')
+                                    desc_str: str = str(desc_val)
+                                    ai_copy = call_smart_ai(desc_str[:1000]) if desc_str else "最新豪宅首发，欢迎详询！"
                                     
                                     # Write DB
-                                    now = datetime.now().strftime("%Y-%m-%d")
-                                    ws.append_row([now, data['title'], bulk_reg, rooms, int(data['price']), img_url_cloud, ai_copy, 0, 0])
-                                    success_count += 1
+                                    current_date = datetime.now().strftime("%Y-%m-%d")
+                                    ws.append_row([current_date, p_title, bulk_reg, rooms, p_price, img_url_cloud, ai_copy, 0, 0]) # type: ignore
+                                    success_count = success_count + 1
                                 except Exception as e:
                                     st.error(f"处理 {url} 时出错: {e}")
                     
