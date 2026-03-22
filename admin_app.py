@@ -275,7 +275,8 @@ def create_poster(files, title, price, rooms, region="伦敦"):
         draw.text((40, 2030), f"Location: {region}", font=font_footer, fill=(100, 100, 100))
         
         draw.text((40, 2100), f"GBP {price} / PCM", font=font_price, fill=(191, 160, 100))
-        draw.text((700, 2140), f"|  {rooms}", font=font_title, fill=(120, 120, 120))
+        # 户型标签：用圆点分隔，避免竖线符号渲染为灰色线条
+        draw.text((40, 2225), f"•  {rooms}", font=font_footer, fill=(120, 120, 120))
         
         # 装饰金色线条
         draw.line([(40, 2260), (1160, 2260)], fill=(200, 200, 200), width=3)
@@ -422,13 +423,13 @@ if ws:
 
     with t3:
         st.subheader("🚀 批量印钞机 (Bulk Scraper Engine)")
-        st.info("💡 批量粘贴 Rightmove 链接，去泡杯咖啡，系统会为您自动抓取图片、排版海报上云、AI写文案，并在后台静默发房！")
+        st.info("💡 批量粘贴 Rightmove 链接，去泡杯咖啡，系统会为您自动抓取图片、排版海报上云、AI写文案，并在后台静默发房！区域将自动根据邮编识别，无需手动指定。")
         bulk_urls = st.text_area("输入 Rightmove 链接 (每行一个)", height=200, placeholder="https://www.rightmove.co.uk/properties/12345...\nhttps://www.rightmove.co.uk/properties/67890...")
         
         b_c1, b_c2 = st.columns(2)
-        bulk_reg = b_c1.selectbox("统一默认区域", ["中伦敦", "东伦敦", "西伦敦", "北伦敦", "南伦敦"])
+        bulk_reg = b_c1.selectbox("兜底默认区域 (邮编识别失败时使用)", ["中伦敦", "东伦敦", "西伦敦", "北伦敦", "南伦敦"])
         bulk_room_opts = ["Studio", "1房", "2房", "3房", "4房+"]
-        bulk_room = b_c2.selectbox("降级默认户型 (抓取不到时的回退值)", bulk_room_opts, index=2)
+        bulk_room = b_c2.selectbox("降级默认户型 (抓取不到时的回退值)", bulk_room_opts, index=0)
         
         if st.button("⚡ 开始批量全自动处理 (Start Bulk Process)", type="primary"):
             urls = [u.strip() for u in bulk_urls.split('\n') if u.strip().startswith('http')]
@@ -442,44 +443,62 @@ if ws:
                 for i, url in enumerate(urls):
                     status_text.text(f"正在处理 ({i+1}/{len(urls)}): {url}")
                     scraped_data, err = scrape_rightmove(url)
-                    if isinstance(scraped_data, dict) and not err:
-                        # Fetch images
-                        files_to_use = []
-                        img_list: Any = scraped_data.get('images', [])
-                        if isinstance(img_list, list):
-                            for img_url in img_list:
-                                try:
-                                    r_img = requests.get(str(img_url), timeout=10)
-                                    if r_img.status_code == 200:
-                                        files_to_use.append(BytesIO(r_img.content))
-                                except: pass
-                        
-                        if files_to_use:
-                            rooms: str = str(scraped_data.get('rooms', bulk_room))
-                            if rooms not in bulk_room_opts: rooms = bulk_room
-                            # Create Poster
-                            p_title: str = str(scraped_data.get('title', ''))
-                            p_price: int = int(scraped_data.get('price', 0))
-                            p_poster = create_poster(files_to_use, p_title, p_price, rooms, bulk_reg)
-                            if p_poster:
-                                try:
-                                    buf = BytesIO()
-                                    p_poster.save(buf, format="JPEG", quality=90)
-                                    up_res = cloudinary.uploader.upload(buf.getvalue()) # type: ignore
-                                    img_url_cloud = up_res['secure_url']
-                                    
-                                    # AI Copy
-                                    desc_val = scraped_data.get('description', '')
-                                    desc_str: str = str(desc_val)
-                                    ai_copy = call_smart_ai(desc_str[:1000]) if desc_str else "最新豪宅首发，欢迎详询！"
-                                    
-                                    # Write DB
-                                    current_date = datetime.now().strftime("%Y-%m-%d")
-                                    ws.append_row([current_date, p_title, bulk_reg, rooms, p_price, img_url_cloud, ai_copy, 0, 0]) # type: ignore
-                                    success_count = success_count + 1
-                                except Exception as e:
-                                    st.error(f"处理 {url} 时出错: {e}")
+                    if err:
+                        st.warning(f"⚠️ 跳过 [{i+1}]：抓取失败 — {err}")
+                        progress_bar.progress((i + 1) / len(urls))
+                        continue
+                    if not isinstance(scraped_data, dict):
+                        st.warning(f"⚠️ 跳过 [{i+1}]：解析数据失败，请检查链接是否为有效房源页")
+                        progress_bar.progress((i + 1) / len(urls))
+                        continue
+                    # 下载图片
+                    files_to_use = []
+                    img_list: Any = scraped_data.get('images', [])
+                    if isinstance(img_list, list):
+                        for img_url in img_list:
+                            try:
+                                r_img = requests.get(str(img_url), timeout=10)
+                                if r_img.status_code == 200:
+                                    files_to_use.append(BytesIO(r_img.content))
+                            except: pass
+                    
+                    if not files_to_use:
+                        st.warning(f"⚠️ 跳过 [{i+1}]：该房源没有可用图片")
+                        progress_bar.progress((i + 1) / len(urls))
+                        continue
+                    
+                    rooms_val: str = str(scraped_data.get('rooms', bulk_room))
+                    if rooms_val not in bulk_room_opts: rooms_val = bulk_room
+                    # 智能分区：优先用邮编自动识别的区域，失败时才用兜底默认值
+                    auto_region_bulk: str = str(scraped_data.get('region', bulk_reg))
+                    detected_pc_bulk: str = str(scraped_data.get('postcode', ''))
+                    final_reg: str = auto_region_bulk if auto_region_bulk in ["中伦敦", "东伦敦", "西伦敦", "北伦敦", "南伦敦"] else bulk_reg
+                    pc_hint = f" [{detected_pc_bulk} → {final_reg}]" if detected_pc_bulk else f" [→ {final_reg}]"
+                    status_text.text(f"正在处理 ({i+1}/{len(urls)}){pc_hint}: {url}")
+                    # 生成海报
+                    p_title: str = str(scraped_data.get('title', ''))
+                    p_price: int = int(scraped_data.get('price', 0))
+                    p_poster = create_poster(files_to_use, p_title, p_price, rooms_val, final_reg)
+                    if p_poster:
+                        try:
+                            buf = BytesIO()
+                            p_poster.save(buf, format="JPEG", quality=90)
+                            up_res = cloudinary.uploader.upload(buf.getvalue()) # type: ignore
+                            img_url_cloud = up_res['secure_url']
+                            # AI 文案
+                            desc_val = scraped_data.get('description', '')
+                            desc_str: str = str(desc_val)
+                            ai_copy = call_smart_ai(desc_str[:1000]) if desc_str else "最新豪宅首发，欢迎详询！"
+                            # 写入数据库
+                            current_date = datetime.now().strftime("%Y-%m-%d")
+                            ws.append_row([current_date, p_title, final_reg, rooms_val, p_price, img_url_cloud, ai_copy, 0, 0]) # type: ignore
+                            success_count = success_count + 1
+                            st.success(f"✅ [{i+1}] {p_title} ({final_reg}) 发布成功！")
+                        except Exception as e:
+                            st.error(f"❌ [{i+1}] 上传出错: {e}")
+                    else:
+                        st.warning(f"⚠️ 跳过 [{i+1}]：海报渲染失败")
                     
                     progress_bar.progress((i + 1) / len(urls))
                 
-                status_text.success(f"🎉 跑完啦！成功录入 {success_count} 套高级源。去客户端看看吧！")
+                status_text.success(f"🎉 全部完成！成功录入 {success_count} / {len(urls)} 套。去客户端看看吧！")
