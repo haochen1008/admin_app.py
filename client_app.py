@@ -50,7 +50,7 @@ def get_data():
 
 # --- 3. 详情弹窗 (修复重复，保留功能) ---
 @st.dialog("Property Details")
-def show_details(item, ws, row_idx):
+def show_details(item, ws, row_idx, df=None):
     # A. 高清海报 (F列)
     img_url = item.get('poster-link', '')
     if img_url:
@@ -64,7 +64,11 @@ def show_details(item, ws, row_idx):
     st.markdown(f"📅 **发布日期**: {item.get('date', '近期')}")
     
     c1, c2, c3 = st.columns(3)
-    c1.metric("月租", f"£{item['price']}")
+    try:
+        rmb_price = int(float(item['price'])) * 9.2
+        c1.metric("月租", f"£{item['price']}", f"约合 ¥{rmb_price:,.0f}/月", delta_color="off")
+    except:
+        c1.metric("月租", f"£{item['price']}")
     c2.metric("区域", item['region'])
     c3.metric("户型", item['rooms'])
     
@@ -78,8 +82,11 @@ def show_details(item, ws, row_idx):
     st.code(formatted_desc, language=None)
 
     st.markdown("---")
+    st.markdown("### 🗺️ 位置周边概览")
     m_q = urllib.parse.quote(item['title'] + " London")
-    st.link_button("📍 在 Google Maps 查看位置", f"https://www.google.com/maps/search/{m_q}", use_container_width=True)
+    map_html = f'<iframe width="100%" height="300" frameborder="0" style="border:0; border-radius: 8px; margin-bottom: 5px;" src="https://maps.google.com/maps?q={m_q}&t=&z=14&ie=UTF8&iwloc=&output=embed" allowfullscreen></iframe>'
+    st.markdown(map_html, unsafe_allow_html=True)
+    st.link_button("📍 跳转 Google Maps 导航", f"https://www.google.com/maps/search/{m_q}", use_container_width=True)
 
     # 联系方式
     st.markdown("### 📱 预约咨询")
@@ -91,11 +98,25 @@ def show_details(item, ws, row_idx):
         wa_url = f"https://wa.me/447450912493?text=Interested in {item['title']}"
         st.markdown(f'<a href="{wa_url}" class="wa-link">💬 WhatsApp</a>', unsafe_allow_html=True)
 
-    # 浏览量
+    # 浏览量与相似房源推荐
     try:
         new_v = int(item.get('views', 0)) + 1
         ws.update_cell(row_idx, 8, new_v)
     except: pass
+
+    if df is not None:
+        similar = df[(df['region'] == item['region']) & (df['title'] != item['title'])]
+        if not similar.empty:
+            st.markdown("---")
+            st.markdown("### 💡 您可能还会喜欢 (Similar Properties)")
+            s_cols = st.columns(3)
+            for j, (_, s_row) in enumerate(similar.head(3).iterrows()):
+                with s_cols[j % 3]:
+                    s_url = s_row.get('poster-link', '')
+                    if s_url: st.image(s_url, use_container_width=True)
+                    t_short = s_row['title'][:25] + ".." if len(s_row['title']) > 25 else s_row['title']
+                    st.markdown(f"**{t_short}**", unsafe_allow_html=True)
+                    st.markdown(f"<span style='color:#bfa064;font-weight:bold;'>£{s_row['price']}</span>", unsafe_allow_html=True)
 
 # --- 4. 主程序：四大 TAB ---
 st.markdown("<h1 style='text-align:center; color:#1a1a1a; font-family:serif; font-size:42px;'>HAO HARBOUR</h1>", unsafe_allow_html=True)
@@ -119,9 +140,9 @@ if not df.empty:
                         p_url = row.get('poster-link', '')
                         if p_url: st.image(p_url, use_container_width=True)
                         st.markdown(f'<div class="prop-title">{row["title"]}</div>', unsafe_allow_html=True)
-                        st.markdown(f'<div class="prop-price">£{row["price"]} /mo</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="prop-price">£{row["price"]} /mo <span style="font-size:12px;color:#999;">(约¥{int(float(row["price"] or 0))*9.2:,.0f})</span></div>', unsafe_allow_html=True)
                         if st.button("详情", key=f"f_btn_{idx}_{i}", use_container_width=True):
-                            show_details(row, worksheet, idx + 2)
+                            show_details(row, worksheet, idx + 2, df)
             st.markdown("---")
             st.markdown("### 🏠 房源大厅")
 
@@ -183,13 +204,13 @@ if not df.empty:
                         p_url = row.get('poster-link', '')
                         if p_url: st.image(p_url, use_container_width=True)
                         st.markdown(f'<div class="prop-title">{row["title"]}</div>', unsafe_allow_html=True)
-                        st.markdown(f'<div class="prop-price">£{row["price"]} /mo</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="prop-price">£{row["price"]} /mo <span style="font-size:12px;color:#999;">(约¥{int(float(row["price"] or 0))*9.2:,.0f})</span></div>', unsafe_allow_html=True)
                         
                         d_val = row['date'].strftime('%Y-%m-%d') if pd.notnull(row['date']) else "近期"
                         st.markdown(f'<div class="prop-date">📍 {row["region"]} | 🗓️ {d_val}</div>', unsafe_allow_html=True)
                         
                         if st.button("详情", key=f"btn_{idx}_{i}", use_container_width=True):
-                            show_details(row, worksheet, idx + 2)
+                            show_details(row, worksheet, idx + 2, df)
             
             # 分页控件
             st.markdown("---")
