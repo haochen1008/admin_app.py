@@ -68,15 +68,13 @@ def scrape_rightmove(url):
         res.raise_for_status()
         html = res.text
         if 'window.PAGE_MODEL = ' in html:
-            page_model_raw = html.split('window.PAGE_MODEL = ')[1].split('</script>')[0].strip()
-            end_idx = page_model_raw.find('};')
-            if end_idx != -1: page_model_raw = page_model_raw[:end_idx + 1]
-            else:
-                last_brace = page_model_raw.rfind('}')
-                if last_brace != -1: page_model_raw = page_model_raw[:last_brace + 1]
+            page_model_raw = html.split('window.PAGE_MODEL = ')[1].strip()
+            try:
+                data, _ = json.JSONDecoder().raw_decode(page_model_raw)
+                p_data = data.get('propertyData', {})
+            except json.JSONDecodeError as e:
+                return None, f"JSON解析失败: {e}"
             
-            data = json.loads(page_model_raw)
-            p_data = data.get('propertyData', {})
             if p_data:
                 title = p_data.get('text', {}).get('pageTitle', '')
                 price_str = p_data.get('prices', {}).get('primaryPrice', '')
