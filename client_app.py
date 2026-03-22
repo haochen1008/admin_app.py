@@ -8,6 +8,13 @@ import requests
 # --- 1. 页面配置与 CSS ---
 st.set_page_config(page_title="Hao Harbour | London Luxury", layout="wide")
 
+if 'page' not in st.session_state:
+    st.session_state.page = 1
+
+def reset_page():
+    st.session_state.page = 1
+
+
 st.markdown("""
     <style>
     /* 导航标签样式 */
@@ -100,23 +107,37 @@ if not df.empty:
     tabs = st.tabs(["🏠 房源精选", "🛠️ 我们的服务", "👤 关于我们", "📞 联系方式"])
     
     # --- TAB 1: 房源精选 ---
-    # --- TAB 1: 房源精选 ---
     with tabs[0]:
-        # 1. 顶部筛选器与排序器
-        with st.expander("🔍 筛选与高级排序", expanded=False):
-            search_q = st.text_input("输入楼盘、地铁站关键词...", "").lower()
+        # --- 精选独家房源预展区 ---
+        featured_df = df[df['is_featured'] == 1].copy()
+        if not featured_df.empty:
+            st.markdown("### 🌟 精选独家房源 (Featured Lettings)")
+            f_cols = st.columns(3)
+            for i, (idx, row) in enumerate(featured_df.head(3).iterrows()):
+                with f_cols[i % 3]:
+                    with st.container(border=True):
+                        p_url = row.get('poster-link', '')
+                        if p_url: st.image(p_url, use_container_width=True)
+                        st.markdown(f'<div class="prop-title">{row["title"]}</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="prop-price">£{row["price"]} /mo</div>', unsafe_allow_html=True)
+                        if st.button("详情", key=f"f_btn_{idx}_{i}", use_container_width=True):
+                            show_details(row, worksheet, idx + 2)
+            st.markdown("---")
+            st.markdown("### 🏠 房源大厅")
+
+        # 1. 顶部排序与筛选器
+        s1, s2 = st.columns(2)
+        sort_by = s1.selectbox("排序维度", ["发布时间", "租金价格"], index=0, on_change=reset_page)
+        sort_order = s2.selectbox("排序方式", ["从新到旧 (Newest) / 从高到低 (Highest)", "从旧到新 (Oldest) / 从低到高 (Lowest)"], index=0, on_change=reset_page)
+
+        with st.expander("🔍 高级筛选与搜索", expanded=False):
+            search_q = st.text_input("输入楼盘、地铁站关键词...", "", on_change=reset_page).lower()
             
             f1, f2, f3 = st.columns(3)
-            sel_reg = f1.multiselect("区域", options=sorted(df['region'].unique()))
-            sel_room = f2.multiselect("户型", options=sorted(df['rooms'].unique()))
-            max_p = f3.slider("预算上限 (£)", 1000, 15000, 15000)
+            sel_reg = f1.multiselect("区域", options=sorted(df['region'].unique()), on_change=reset_page)
+            sel_room = f2.multiselect("户型", options=sorted(df['rooms'].unique()), on_change=reset_page)
+            max_p = f3.slider("预算上限 (£)", 1000, 15000, 15000, on_change=reset_page)
             
-            st.markdown("---")
-            # 新增：排序控制列
-            s1, s2 = st.columns(2)
-            sort_by = s1.selectbox("排序维度", ["发布时间", "租金价格"])
-            sort_order = s2.selectbox("排序方式", ["从高到低 (Newest/Highest)", "从低到高 (Oldest/Lowest)"])
-        
         f_df = df.copy()
 
         # 2. 基础过滤
@@ -129,36 +150,60 @@ if not df.empty:
         f_df['p_num'] = pd.to_numeric(f_df['price'], errors='coerce').fillna(0)
         f_df = f_df[f_df['p_num'] <= max_p]
 
-        # 转换日期格式 (核心修复)
+        # 转换日期格式
         f_df['date'] = pd.to_datetime(f_df['date'], errors='coerce')
         
         # 3. 执行用户自定义排序
-        is_asc = (sort_order == "从低到高 (Oldest/Lowest)")
+        is_asc = ("从旧到新" in sort_order)
         
         if sort_by == "发布时间":
-            # 始终保持 is_featured 置顶，然后根据日期排序
             f_df = f_df.sort_values(by=['is_featured', 'date'], ascending=[False, is_asc])
         else:
-            # 始终保持 is_featured 置顶，然后根据价格排序
             f_df = f_df.sort_values(by=['is_featured', 'p_num'], ascending=[False, is_asc])
 
-        # 4. 渲染房源
-        st.markdown(f"共有 **{len(f_df)}** 套符合条件的房源")
-        cols = st.columns(3)
-        for i, (idx, row) in enumerate(f_df.iterrows()):
-            with cols[i % 3]:
-                with st.container(border=True):
-                    p_url = row.get('poster-link', '')
-                    if p_url: st.image(p_url, use_container_width=True)
-                    st.markdown(f'<div class="prop-title">{row["title"]}</div>', unsafe_allow_html=True)
-                    st.markdown(f'<div class="prop-price">£{row["price"]} /mo</div>', unsafe_allow_html=True)
-                    
-                    # 格式化显示日期
-                    d_val = row['date'].strftime('%Y-%m-%d') if pd.notnull(row['date']) else "近期"
-                    st.markdown(f'<div class="prop-date">📍 {row["region"]} | 🗓️ {d_val}</div>', unsafe_allow_html=True)
-                    
-                    if st.button("详情", key=f"btn_{idx}_{i}", use_container_width=True):
-                        show_details(row, worksheet, idx + 2)
+        # 4. 渲染房源 (分页与空状态)
+        if len(f_df) == 0:
+            st.info("🏡 **暂无完全匹配的公开房源。**\n\nHao Harbour 掌握大量伦敦独家 Off-Market 房源，请直接联系我们的私人顾问（微信：**HaoHarbour**）获取为您量身定制的专属推荐。")
+        else:
+            ITEMS_PER_PAGE = 8
+            total_pages = max(1, (len(f_df) - 1) // ITEMS_PER_PAGE + 1)
+            
+            if st.session_state.page > total_pages:
+                st.session_state.page = 1
+                
+            start_idx = (st.session_state.page - 1) * ITEMS_PER_PAGE
+            end_idx = start_idx + ITEMS_PER_PAGE
+            page_df = f_df.iloc[start_idx:end_idx]
+
+            st.markdown(f"共有 **{len(f_df)}** 套符合条件的房源，当前显示第 **{st.session_state.page} / {total_pages}** 页")
+            cols = st.columns(3)
+            for i, (idx, row) in enumerate(page_df.iterrows()):
+                with cols[i % 3]:
+                    with st.container(border=True):
+                        p_url = row.get('poster-link', '')
+                        if p_url: st.image(p_url, use_container_width=True)
+                        st.markdown(f'<div class="prop-title">{row["title"]}</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="prop-price">£{row["price"]} /mo</div>', unsafe_allow_html=True)
+                        
+                        d_val = row['date'].strftime('%Y-%m-%d') if pd.notnull(row['date']) else "近期"
+                        st.markdown(f'<div class="prop-date">📍 {row["region"]} | 🗓️ {d_val}</div>', unsafe_allow_html=True)
+                        
+                        if st.button("详情", key=f"btn_{idx}_{i}", use_container_width=True):
+                            show_details(row, worksheet, idx + 2)
+            
+            # 分页控件
+            st.markdown("---")
+            p_c1, p_c2, p_c3 = st.columns([1, 2, 1])
+            with p_c1:
+                if st.button("⬅️ 上一页", disabled=(st.session_state.page <= 1), use_container_width=True):
+                    st.session_state.page -= 1
+                    st.rerun()
+            with p_c2:
+                st.markdown(f"<div style='text-align: center; padding-top: 10px;'>第 <b>{st.session_state.page}</b> 页 / 共 <b>{total_pages}</b> 页</div>", unsafe_allow_html=True)
+            with p_c3:
+                if st.button("下一页 ➡️", disabled=(st.session_state.page >= total_pages), use_container_width=True):
+                    st.session_state.page += 1
+                    st.rerun()
                         
     # --- TAB 2: 我们的服务 (完全还原你的原始文案) ---
     with tabs[1]:
