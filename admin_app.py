@@ -76,7 +76,11 @@ def scrape_rightmove(url):
                 return None, f"JSON解析失败: {e}"
             
             if p_data:
-                title = p_data.get('text', {}).get('pageTitle', '')
+                raw_title = p_data.get('text', {}).get('pageTitle', '')
+                if " in " in raw_title:
+                    title = raw_title.split(" in ", 1)[-1].strip()
+                else:
+                    title = raw_title
                 price_str = p_data.get('prices', {}).get('primaryPrice', '')
                 try: price = int(re.sub(r'[^\d]', '', price_str))
                 except: price = 0
@@ -148,22 +152,14 @@ def create_poster(files, title, price, rooms, region="伦敦"):
 
         # D. 底部专业信息区 (Y = 1950 起始)
         draw.text((40, 1950), f"{title}", font=font_title, fill=(40, 40, 40))
-        draw.text((40, 2030), f"📍 Location: {region}", font=font_footer, fill=(100, 100, 100))
+        draw.text((40, 2030), f"Location: {region}", font=font_footer, fill=(100, 100, 100))
         
-        draw.text((40, 2100), f"£{price} / PCM", font=font_price, fill=(191, 160, 100))
-        draw.text((650, 2140), f"|  {rooms}", font=font_title, fill=(120, 120, 120))
+        draw.text((40, 2100), f"GBP {price} / PCM", font=font_price, fill=(191, 160, 100))
+        draw.text((700, 2140), f"|  {rooms}", font=font_title, fill=(120, 120, 120))
         
         # 装饰金色线条
         draw.line([(40, 2260), (1160, 2260)], fill=(200, 200, 200), width=3)
-        draw.text((40, 2280), "Hao Harbour | Official | Exclusive London Property", font=font_footer, fill=(180, 160, 100))
-        
-        # 尝试加载 Logo 并放到右侧
-        try:
-            logo = Image.open("logo.jpg").convert("RGBA")
-            logo.thumbnail((240, 240), Image.Resampling.LANCZOS)
-            canvas.paste(logo, (900, 1980), logo)
-        except:
-            pass
+        draw.text((40, 2280), "Hao Harbour Exclusive London Property", font=font_footer, fill=(180, 160, 100))
         
         return canvas
     except Exception as e:
