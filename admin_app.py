@@ -48,7 +48,7 @@ def call_smart_ai(text):
     if not text: return "✓ 请输入描述"
     try:
         api_key = st.secrets["OPENAI_API_KEY"]
-        prompt = "作为房产专家，总结为中文列表。每行✓开头，保留楼盘和地铁站名。"
+        prompt = "作为一名资深伦敦房产专家，请将这段英文房源描述转化为极具吸引力的小红书爆款文案。要求：1. 标题要吸睛（使用Emoji）；2. 核心卖点提炼清晰（地理位置、交通、设施等）；3. 语言生动活泼，多使用小红书常用Emoji；4. 绝对不要包含微信号或任何扫码加微信等容易被封号的词汇，可以写'欢迎私信或留言咨询'；5. 结尾加上相关的热门标签（如 #伦敦租房 #伦敦公寓 等）。"
         r = requests.post("https://api.deepseek.com/chat/completions",
             json={"model": "deepseek-chat", "messages": [{"role": "system", "content": prompt}, {"role": "user", "content": text}]},
             headers={"Authorization": f"Bearer {api_key}"}, timeout=25)
@@ -87,58 +87,83 @@ def scrape_rightmove(url):
                 elif bedrooms >= 4: rooms_str = "4房+"
                 else: rooms_str = f"{bedrooms}房"
                 images = [img.get('url') for img in p_data.get('images', []) if img.get('url')]
+                floorplans = [fp.get('url') for fp in p_data.get('floorplans', []) if fp.get('url')]
+                
+                final_images = images[:8]
+                if floorplans and len(final_images) >= 7:
+                    final_images = final_images[:7] + [floorplans[0]]
+                elif floorplans:
+                    final_images.append(floorplans[0])
                 
                 return {
-                    'title': title, 'price': price, 'rooms': rooms_str, 'description': desc, 'images': images[:6]
+                    'title': title, 'price': price, 'rooms': rooms_str, 'description': desc, 'images': final_images
                 }, None
         return None, "无法解析数据，请检查链接是否为房源页"
     except Exception as e:
         return None, f"抓取失败: {e}"
 
 # --- 4. 核心：海报引擎 (仅修改 display_text 拼接) ---
-def create_poster(files, title, price, rooms):
+def create_poster(files, title, price, rooms, region="伦敦"):
     try:
-        # 1200x1800 高清画布
-        canvas = Image.new('RGB', (1200, 1800), (255, 255, 255))
+        # 1200x2350 高清加长画布 (8宫格)
+        canvas = Image.new('RGB', (1200, 2350), (255, 255, 255))
         draw = ImageDraw.Draw(canvas)
         
         try:
+            font_banner = ImageFont.truetype("simhei.ttf", 60)
             font_title = ImageFont.truetype("simhei.ttf", 65)
+            font_price = ImageFont.truetype("simhei.ttf", 100)
             font_footer = ImageFont.truetype("simhei.ttf", 38)
             font_wm = ImageFont.truetype("simhei.ttf", 130) # 水印字体
         except:
-            font_title = font_footer = font_wm = ImageFont.load_default()
+            font_banner = font_title = font_price = font_footer = font_wm = ImageFont.load_default()
 
-        # A. 6 宫格拼接
-        for i, f in enumerate(files[:6]):
-            img = Image.open(f).convert('RGB').resize((590, 450), Image.Resampling.LANCZOS)
-            x = 7 + (i % 2) * 597
-            y = 7 + (i // 2) * 457
+        # A. 顶部横幅 Banner
+        draw.rectangle([(0, 0), (1200, 130)], fill=(26, 26, 26))
+        
+        # 居中 Hao Harbour
+        banner_text = "HAO HARBOUR"
+        left_padding = 420
+        # draw.text_length
+        draw.text((left_padding, 35), banner_text, font=font_banner, fill=(191, 160, 100))
+
+        # B. 8 宫格拼接 (2列 x 4行)
+        for i, f in enumerate(files[:8]):
+            img = Image.open(f).convert('RGB').resize((575, 430), Image.Resampling.LANCZOS)
+            x = 20 + (i % 2) * 585
+            y = 150 + (i // 2) * 440
             canvas.paste(img, (x, y))
 
-        # B. 双居中加深水印 (一上一下)
+        # C. 双居中加深水印 (一上一下)
         wm_layer = Image.new('RGBA', canvas.size, (0, 0, 0, 0))
         wm_draw = ImageDraw.Draw(wm_layer)
-        wm_color = (255, 255, 255, 160) 
+        wm_color = (255, 255, 255, 140) 
         
-        # 上水印
-        wm_draw.text((220, 400), "Hao Harbour", font=font_wm, fill=wm_color)
-        # 下水印
-        wm_draw.text((220, 900), "Hao Harbour", font=font_wm, fill=wm_color)
+        # 水印位置顺应更长的画布
+        wm_draw.text((220, 600), "Hao Harbour", font=font_wm, fill=wm_color)
+        wm_draw.text((220, 1500), "Hao Harbour", font=font_wm, fill=wm_color)
         
         rotated_wm = wm_layer.rotate(30, expand=False)
         canvas.paste(rotated_wm, (0, 0), rotated_wm)
 
-        # C. 底部信息排版 (在此处修改展示文案)
-        # 拼接后的文案示例: TITLE | GBP 2500/PCM | 2房
-        display_text = f"{title} | {price}/PM | {rooms}"
-        draw.text((60, 1460), display_text, font=font_title, fill=(0, 0, 0))
+        # D. 底部专业信息区 (Y = 1950 起始)
+        draw.text((40, 1950), f"{title}", font=font_title, fill=(40, 40, 40))
+        draw.text((40, 2030), f"📍 Location: {region}", font=font_footer, fill=(100, 100, 100))
+        
+        draw.text((40, 2100), f"£{price} / PCM", font=font_price, fill=(191, 160, 100))
+        draw.text((650, 2140), f"|  {rooms}", font=font_title, fill=(120, 120, 120))
         
         # 装饰金色线条
-        draw.line([(60, 1550), (1140, 1550)], fill=(200, 200, 200), width=3)
+        draw.line([(40, 2260), (1160, 2260)], fill=(200, 200, 200), width=3)
+        draw.text((40, 2280), "Hao Harbour | Official | Exclusive London Property", font=font_footer, fill=(180, 160, 100))
         
-        # 副标题 (London Excellence)
-        draw.text((60, 1585), "Hao Harbour | London Excellence", font=font_footer, fill=(180, 160, 100))
+        # 尝试加载 Logo 并放到右侧
+        try:
+            logo = Image.open("logo.jpg").convert("RGBA")
+            logo.thumbnail((240, 240), Image.Resampling.LANCZOS)
+            canvas.paste(logo, (900, 1980), logo)
+        except:
+            pass
         
         return canvas
     except Exception as e:
@@ -184,7 +209,7 @@ if ws:
             st.session_state['zh_content'] = call_smart_ai(en_desc)
         
         zh_desc = st.text_area("最终展示描述", value=st.session_state.get('zh_content', ''), height=150)
-        up_imgs = st.file_uploader("上传房源图 (建议6张, 将覆盖自动抓取的图片)", accept_multiple_files=True)
+        up_imgs = st.file_uploader("上传房源图 (建议8张, 将覆盖自动抓取的图片)", accept_multiple_files=True)
         
         # 准备合并图片来源
         files_to_use = up_imgs
@@ -201,8 +226,8 @@ if ws:
                     pass
         
         if files_to_use:
-            # 修改点：这里传入了 p_rooms 给海报引擎
-            preview_img = create_poster(files_to_use, p_name, p_price, p_rooms)
+            # 修改点：传入了 p_reg 区域和 8图排版
+            preview_img = create_poster(files_to_use, p_name, p_price, p_rooms, p_reg)
             if preview_img:
                 st.image(preview_img, caption="双水印强化海报预览", width=450)
                 
