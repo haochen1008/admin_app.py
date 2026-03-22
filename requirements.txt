@@ -2,6 +2,10 @@ streamlit
 pandas
 gspread
 google-auth
-pillow
+Pillow
 cloudinary
 requests
+pdfplumber
+pytrends
+matplotlib
+seaborn
