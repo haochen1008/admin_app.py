@@ -11,6 +11,16 @@ import re
 from io import BytesIO
 from datetime import datetime
 from typing import List, Dict, Any, Optional
+import matplotlib.pyplot as plt
+import seaborn as sns
+try:
+    import pdfplumber
+except ImportError:
+    pdfplumber = None
+try:
+    from pytrends.request import TrendReq
+except ImportError:
+    TrendReq = None
 
 
 # --- 1. 初始化配置 ---
@@ -286,11 +296,229 @@ def create_poster(files, title, price, rooms, region="伦敦"):
     except Exception as e:
         st.error(f"海报生成出错: {e}")
         return None
+# --- 4b. 微信方版海报 1080x1080 ---
+def create_wechat_poster(files, title, price, rooms, region="伦敦"):
+    try:
+        canvas = Image.new('RGB', (1080, 1080), (255, 255, 255))
+        draw = ImageDraw.Draw(canvas)
+        try:
+            fb = ImageFont.truetype("simhei.ttf", 48)
+            ft = ImageFont.truetype("simhei.ttf", 44)
+            fp = ImageFont.truetype("simhei.ttf", 68)
+            ff = ImageFont.truetype("simhei.ttf", 30)
+            fw = ImageFont.truetype("simhei.ttf", 100)
+        except:
+            fb = ft = fp = ff = fw = ImageFont.load_default()
+        # Banner
+        draw.rectangle([(0, 0), (1080, 100)], fill=(26, 26, 26))
+        draw.text((330, 26), "HAO HARBOUR", font=fb, fill=(191, 160, 100))
+        # 2x2 图片网格
+        for i, f in enumerate(files[:4]):
+            img = Image.open(f).convert('RGB').resize((520, 260), Image.Resampling.LANCZOS)
+            x = 20 + (i % 2) * 540
+            y = 115 + (i // 2) * 270
+            canvas.paste(img, (x, y))
+        # 水印
+        wm = Image.new('RGBA', canvas.size, (0,0,0,0))
+        ImageDraw.Draw(wm).text((100, 320), "Hao Harbour", font=fw, fill=(255,255,255,120))
+        wm = wm.rotate(20, expand=False)
+        canvas.paste(wm, (0, 0), wm)
+        # 信息区
+        draw.text((30, 680), title[:28], font=ft, fill=(40,40,40))
+        draw.text((30, 735), f"Location: {region}", font=ff, fill=(100,100,100))
+        draw.text((30, 780), f"GBP {price} / PCM", font=fp, fill=(191,160,100))
+        draw.text((30, 870), f"• {rooms}", font=ff, fill=(120,120,120))
+        draw.line([(30, 910), (1050, 910)], fill=(200,200,200), width=2)
+        draw.text((30, 925), "Hao Harbour Exclusive London Property", font=ff, fill=(180,160,100))
+        return canvas
+    except Exception as e:
+        st.error(f"微信海报生成出错: {e}")
+        return None
 
-# --- 5. 主程序逻辑 ---
+# --- 4c. 抖音/Story 竖版海报 1080x1920 ---
+def create_story_poster(files, title, price, rooms, region="伦敦"):
+    try:
+        canvas = Image.new('RGB', (1080, 1920), (255, 255, 255))
+        draw = ImageDraw.Draw(canvas)
+        try:
+            fb = ImageFont.truetype("simhei.ttf", 54)
+            ft = ImageFont.truetype("simhei.ttf", 55)
+            fp = ImageFont.truetype("simhei.ttf", 85)
+            ff = ImageFont.truetype("simhei.ttf", 34)
+            fw = ImageFont.truetype("simhei.ttf", 110)
+        except:
+            fb = ft = fp = ff = fw = ImageFont.load_default()
+        # Banner
+        draw.rectangle([(0, 0), (1080, 115)], fill=(26, 26, 26))
+        draw.text((330, 28), "HAO HARBOUR", font=fb, fill=(191, 160, 100))
+        # 3x2 图片网格
+        for i, f in enumerate(files[:6]):
+            img = Image.open(f).convert('RGB').resize((520, 370), Image.Resampling.LANCZOS)
+            x = 20 + (i % 2) * 540
+            y = 130 + (i // 2) * 380
+            canvas.paste(img, (x, y))
+        # 水印
+        wm = Image.new('RGBA', canvas.size, (0,0,0,0))
+        wd = ImageDraw.Draw(wm)
+        wd.text((150, 500), "Hao Harbour", font=fw, fill=(255,255,255,120))
+        wd.text((150, 1200), "Hao Harbour", font=fw, fill=(255,255,255,120))
+        wm = wm.rotate(25, expand=False)
+        canvas.paste(wm, (0,0), wm)
+        # 信息区
+        draw.text((40, 1278), title[:30], font=ft, fill=(40,40,40))
+        draw.text((40, 1345), f"Location: {region}", font=ff, fill=(100,100,100))
+        draw.text((40, 1400), f"GBP {price} / PCM", font=fp, fill=(191,160,100))
+        draw.text((40, 1510), f"• {rooms}", font=ff, fill=(120,120,120))
+        draw.line([(40, 1560), (1040, 1560)], fill=(200,200,200), width=2)
+        draw.text((40, 1580), "Hao Harbour Exclusive London Property", font=ff, fill=(180,160,100))
+        # 底部装饰条
+        draw.rectangle([(0, 1860), (1080, 1920)], fill=(26,26,26))
+        draw.text((340, 1874), "@HAO HARBOUR", font=ff, fill=(191,160,100))
+        return canvas
+    except Exception as e:
+        st.error(f"抖音海报生成出错: {e}")
+        return None
+
+# --- 4d. 抖音口播脚本生成 ---
+def gen_douyin_script(title: str, price: int, rooms: str, region: str, desc: str) -> str:
+    try:
+        api_key = st.secrets["OPENAI_API_KEY"]
+        prompt = (
+            "你是一个抖音/小红书房产博主，请根据以下伦敦房源信息，写一段15秒口播文案。"
+            "要求：①开头3秒必须有钩子（惊喜/痛点/数字）②语言口语化、有节奏感 "
+            "③结尾引导点赞收藏 ④全文不超过120字 ⑤不要用微信/扫码等违禁词。"
+        )
+        content = f"房源：{title}，位于{region}，{rooms}，月租£{price}。描述：{desc[:300]}"
+        r = requests.post("https://api.deepseek.com/chat/completions",
+            json={"model": "deepseek-chat", "messages": [
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": content}
+            ]},
+            headers={"Authorization": f"Bearer {api_key}"}, timeout=20)
+        return r.json()['choices'][0]['message']['content'].strip()
+    except:
+        return f"🎬 【{region}·{rooms}】仅£{price}/月！\n{title}，地段好、装修新，稀缺好房等你！\n👉 点赞收藏，私信了解详情！"
+
+# --- 4e. 带看小结生成 ---
+def gen_viewing_summary(client_name: str, prop_title: str, prop_price: int,
+                        prop_rooms: str, prop_region: str,
+                        pros: List[str], cons: List[str],
+                        intention: str, notes: str) -> str:
+    pros_block = "\n".join(f"  • {p}" for p in pros) if pros else "  • 暂无"
+    cons_block = "\n".join(f"  • {c}" for c in cons) if cons else "  • 暂无"
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    return f"""━━━━━━━━━━━━━━━━━━━━━━━━
+🏠 带看小结 | Viewing Summary
+━━━━━━━━━━━━━━━━━━━━━━━━
+📅 日期：{date_str}   👤 客户：{client_name}
+📍 房源：{prop_title}
+💰 月租：£{prop_price} PCM   🛏 户型：{prop_rooms}   📌 区域：{prop_region}
+
+✅ 亮点
+{pros_block}
+
+⚠️ 注意事项
+{cons_block}
+
+💬 客户意向：{intention}
+📝 备注：{notes if notes else '无'}
+
+📋 建议跟进：3天内联系确认意向 → 如感兴趣准备 Referencing 材料清单
+
+— Hao Harbour 独家中介服务
+━━━━━━━━━━━━━━━━━━━━━━━━"""
+
+# --- 4f. 房源对比图生成 (PIL) ---
+def gen_comparison_image(selected_props: List[Dict]) -> Image.Image:
+    # 创建对比长图 (最多4套)
+    n = len(selected_props)
+    w, h = 1200, 800 + (n * 250)
+    img = Image.new('RGB', (w, h), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    try:
+        f_h = ImageFont.truetype("Arial.ttf", 40)
+        f_b = ImageFont.truetype("Arial.ttf", 24)
+        f_p = ImageFont.truetype("Arial.ttf", 32)
+    except:
+        f_h = f_b = f_p = ImageFont.load_default()
+
+    # 标题
+    draw.rectangle([0, 0, w, 120], fill=(191,160,100))
+    draw.text((w//2 - 150, 35), "房源对比表 | Property Comparison", font=f_h, fill=(255,255,255))
+
+    # 表头
+    headers = ["照片", "房源名称", "区域", "户型", "价格 (PCM)"]
+    x_offsets = [50, 250, 550, 750, 950]
+    for i, head in enumerate(headers):
+        draw.text((x_offsets[i], 160), head, font=f_b, fill=(100,100,100))
+    
+    draw.line([(40, 200), (w-40, 200)], fill=(200,200,200), width=2)
+
+    for i, p in enumerate(selected_props):
+        y = 250 + (i * 250)
+        # 缩略图
+        try:
+            r = requests.get(p['poster-link'], timeout=5)
+            thumb = Image.open(BytesIO(r.content)).convert("RGB")
+            thumb.thumbnail((150, 150))
+            img.paste(thumb, (50, y))
+        except:
+            draw.rectangle([50, y, 200, y+150], outline=(200,200,200))
+        
+        draw.text((250, y + 40), str(p['title'])[:20], font=f_b, fill=(40,40,40))
+        draw.text((550, y + 40), str(p['region']), font=f_b, fill=(40,40,40))
+        draw.text((750, y + 40), str(p['rooms']), font=f_b, fill=(40,40,40))
+        draw.text((950, y + 40), f"£{p['price']}", font=f_p, fill=(191,160,100))
+        
+        if i < n - 1:
+            draw.line([(40, y + 210), (w-40, y + 210)], fill=(240,240,240), width=1)
+
+    return img
+
+# --- 4g. 市场热度研究 (Trends) ---
+def get_market_trends(keyword: str = "London Rent"):
+    if not TrendReq: return None
+    try:
+        pytrends = TrendReq(hl='en-US', tz=360)
+        pytrends.build_payload([keyword], cat=0, timeframe='today 3-m', geo='GB-LND')
+        df = pytrends.interest_over_time()
+        return df
+    except:
+        return None
+
+# --- 4h. 合同提取 (AI) ---
+def extract_contract(pdf_file) -> str:
+    if not pdfplumber: return "⚠️ 未安装 pdfplumber 依赖，无法解析 PDF。"
+    try:
+        text = ""
+        with pdfplumber.open(pdf_file) as pdf:
+            for page in pdf.pages[:5]: # 只读前5页
+                text += page.extract_text() or ""
+        
+        api_key = st.secrets["OPENAI_API_KEY"]
+        prompt = (
+            "你是一个专业的英国租房法务助手。请从这段合同文本中提取以下关键信息并用中文输出：\n"
+            "1. 租金金额(PCM) 2. 押金金额 3. 租期起止日期 4. 是否有 Break Clause (几个月) "
+            "5. 维修责任归属 6. 其它潜在风险(如不合理的扣款条款)。\n"
+            "如果没有提到某项，请写'未提及'。"
+        )
+        r = requests.post("https://api.deepseek.com/chat/completions",
+            json={"model": "deepseek-chat", "messages": [
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": text[:8000]} # 截断防止溢出
+            ]},
+            headers={"Authorization": f"Bearer {api_key}"}, timeout=30)
+        return r.json()['choices'][0]['message']['content'].strip()
+    except Exception as e:
+        return f"❌ 提取失败: {e}"
+
+
 ws = get_ws()
 if ws:
-    t1, t2, t3 = st.tabs(["✨ 发布新房源", "⚙️ 管理与统计", "🚀 批量发送引擎"])
+    t1, t2, t3, t4, t5, t6, t7 = st.tabs([
+        "✨ 发布新房源", "⚙️ 管理与统计", "🚀 批量发送引擎",
+        "🌐 多平台内容包", "👁️ 带看小结", "📊 对比与简报", "🧰 工具箱"
+    ])
     
     with t1:
         st.subheader("1. 基础信息")
@@ -502,3 +730,254 @@ if ws:
                     progress_bar.progress((i + 1) / len(urls))
                 
                 status_text.success(f"🎉 全部完成！成功录入 {success_count} / {len(urls)} 套。去客户端看看吧！")
+
+    # =====================================================================
+    # TAB 4 — 🌐 多平台内容包
+    # =====================================================================
+    with t4:
+        st.subheader("🌐 多平台内容包生成器")
+        st.info("💡 同一套房源，一键生成三个平台专属版本：小红书竖版 / 微信方版 / 抖音竖版，同时生成抖音口播脚本。")
+
+        mp_url = st.text_input("🔗 Rightmove 链接（可选，自动填入）", key="mp_url")
+        if st.button("🔍 读取房源", key="mp_fetch"):
+            if mp_url:
+                with st.spinner("抓取中..."):
+                    mp_data, mp_err = scrape_rightmove(mp_url)
+                    if mp_err:
+                        st.error(mp_err)
+                    else:
+                        st.session_state['mp_data'] = mp_data
+                        st.success("✅ 读取成功！")
+
+        mpd = st.session_state.get('mp_data', {})
+        mc1, mc2, mc3, mc4 = st.columns(4)
+        mp_name  = mc1.text_input("房源名称", value=mpd.get('title', ''), key="mp_name")
+        mp_price = mc2.number_input("月租 (£)", min_value=0, value=mpd.get('price', 0), key="mp_price")
+        mp_reg_opts = ["中伦敦", "东伦敦", "西伦敦", "北伦敦", "南伦敦"]
+        mp_auto_reg = mpd.get('region', '中伦敦')
+        mp_reg = mc3.selectbox("区域", mp_reg_opts,
+                               index=mp_reg_opts.index(mp_auto_reg) if mp_auto_reg in mp_reg_opts else 0,
+                               key="mp_reg")
+        mp_rm_opts = ["Studio", "1房", "2房", "3房", "4房+"]
+        mp_default_room = mpd.get('rooms', '')
+        mp_rooms = mc4.selectbox("户型", mp_rm_opts,
+                                 index=mp_rm_opts.index(mp_default_room) if mp_default_room in mp_rm_opts else 0,
+                                 key="mp_rooms")
+        mp_desc = st.text_area("房源描述（用于生成口播文案）", value=mpd.get('description', ''), height=80, key="mp_desc")
+        mp_imgs = st.file_uploader("上传图片（建议 6-8 张）", accept_multiple_files=True, key="mp_files")
+
+        # 如果没有上传，从 Rightmove 抓取的图片自动使用
+        mp_files_to_use = list(mp_imgs) if mp_imgs else []
+        if not mp_files_to_use and mpd.get('images'):
+            for img_url_item in mpd.get('images', []):
+                try:
+                    r_i = requests.get(str(img_url_item), timeout=10)
+                    if r_i.status_code == 200:
+                        mp_files_to_use.append(BytesIO(r_i.content))
+                except: pass
+
+        if st.button("🎨 生成三版海报 + 口播脚本", type="primary", key="mp_gen"):
+            if not mp_files_to_use:
+                st.warning("请先上传图片或读取 Rightmove 链接")
+            elif not mp_name:
+                st.warning("请填写房源名称")
+            else:
+                with st.spinner("正在生成三个版本，稍等片刻..."):
+                    p_xhs  = create_poster(mp_files_to_use, mp_name, mp_price, mp_rooms, mp_reg)
+                    p_wc   = create_wechat_poster(mp_files_to_use, mp_name, mp_price, mp_rooms, mp_reg)
+                    p_dy   = create_story_poster(mp_files_to_use, mp_name, mp_price, mp_rooms, mp_reg)
+                    script = gen_douyin_script(mp_name, int(mp_price), mp_rooms, mp_reg, mp_desc)
+
+                if p_xhs and p_wc and p_dy:
+                    st.session_state['mp_posters'] = (p_xhs, p_wc, p_dy)
+                    st.session_state['mp_script'] = script
+                    st.success("✅ 三版海报生成完毕！")
+
+        if 'mp_posters' in st.session_state:
+            p_xhs, p_wc, p_dy = st.session_state['mp_posters']
+            col_xhs, col_wc, col_dy = st.columns(3)
+            with col_xhs:
+                st.markdown("**📱 小红书竖版** (1200×2350)")
+                st.image(p_xhs, use_container_width=True)
+                buf_xhs = BytesIO()
+                p_xhs.save(buf_xhs, format="JPEG", quality=95)
+                st.download_button("⬇️ 下载小红书版", data=buf_xhs.getvalue(),
+                                   file_name=f"xhs_{mp_name[:15]}.jpg", mime="image/jpeg", key="dl_xhs")
+            with col_wc:
+                st.markdown("**💬 微信方版** (1080×1080)")
+                st.image(p_wc, use_container_width=True)
+                buf_wc = BytesIO()
+                p_wc.save(buf_wc, format="JPEG", quality=95)
+                st.download_button("⬇️ 下载微信版", data=buf_wc.getvalue(),
+                                   file_name=f"wechat_{mp_name[:15]}.jpg", mime="image/jpeg", key="dl_wc")
+            with col_dy:
+                st.markdown("**🎬 抖音Story版** (1080×1920)")
+                st.image(p_dy, use_container_width=True)
+                buf_dy = BytesIO()
+                p_dy.save(buf_dy, format="JPEG", quality=95)
+                st.download_button("⬇️ 下载抖音版", data=buf_dy.getvalue(),
+                                   file_name=f"douyin_{mp_name[:15]}.jpg", mime="image/jpeg", key="dl_dy")
+
+            st.markdown("---")
+            st.markdown("**🎙️ 抖音/小红书 15秒口播文案**")
+            st.text_area("复制后配合视频使用", value=st.session_state.get('mp_script', ''), height=160, key="mp_script_box")
+
+            # 一键打包下载（ZIP）
+            import zipfile
+            zip_buf = BytesIO()
+            with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for label, buf in [("xhs", buf_xhs), ("wechat", buf_wc), ("douyin", buf_dy)]:
+                    zf.writestr(f"{label}_{mp_name[:15]}.jpg", buf.getvalue())
+                zf.writestr("script.txt", st.session_state.get('mp_script', '').encode('utf-8'))
+            st.download_button("📦 一键下载全部（ZIP）", data=zip_buf.getvalue(),
+                               file_name=f"hao_harbour_{mp_name[:15]}.zip",
+                               mime="application/zip", key="dl_zip")
+
+    # =====================================================================
+    # TAB 5 — 👁️ 带看小结生成器
+    # =====================================================================
+    with t5:
+        st.subheader("👁️ 带看小结生成器")
+        st.info("填写看房信息，一键生成可直接发给客户的带看小结（中文版）。")
+
+        vs_c1, vs_c2 = st.columns(2)
+        vs_client = vs_c1.text_input("👤 客户姓名", placeholder="例：王女士")
+        vs_date   = vs_c2.date_input("📅 看房日期", value=datetime.today())
+
+        # 从已发布房源中选择
+        all_props = ws.get_all_records()
+        prop_titles = [f"{r.get('title','?')} — £{r.get('price','?')} ({r.get('region','?')})" for r in all_props]
+        vs_prop_idx = st.selectbox("🏠 看的是哪套房源？", options=range(len(prop_titles)),
+                                   format_func=lambda x: prop_titles[x] if prop_titles else "暂无房源",
+                                   key="vs_prop") if prop_titles else None
+
+        selected_prop = all_props[vs_prop_idx] if vs_prop_idx is not None and all_props else {}
+
+        st.markdown("**✅ 亮点（多选）**")
+        pros_opts = ["采光好/朝南", "交通便利（地铁步行 ≤10 分钟）", "设施全新", "装修现代",
+                     "楼层高/视野开阔", "价格合理/性价比高", "管理公司口碑好", "安静低噪", "附近学校/购物方便"]
+        vs_pros = []
+        pc = st.columns(3)
+        for i, opt in enumerate(pros_opts):
+            if pc[i % 3].checkbox(opt, key=f"pro_{i}"):
+                vs_pros.append(opt)
+
+        st.markdown("**⚠️ 注意事项（多选）**")
+        cons_opts = ["不含停车位", "楼层低/噪音", "押金高（>6周）", "无 break clause",
+                     "面积偏小", "装修老旧", "厨卫需更新", "临近工地/施工", "采光一般"]
+        vs_cons = []
+        cc = st.columns(3)
+        for i, opt in enumerate(cons_opts):
+            if cc[i % 3].checkbox(opt, key=f"con_{i}"):
+                vs_cons.append(opt)
+
+        intention_opts = ["😍 非常感兴趣，马上申请", "😊 较感兴趣，需家人商量", "🤔 一般，再看看其他", "😐 不感兴趣"]
+        vs_intention = st.selectbox("💬 客户意向", intention_opts, key="vs_intent")
+        vs_notes = st.text_area("📝 额外备注（可选）", height=80, key="vs_notes")
+
+        if st.button("📋 生成带看小结", type="primary", key="vs_gen"):
+            if not vs_client:
+                st.warning("请填写客户姓名")
+            elif not selected_prop:
+                st.warning("请选择看的房源")
+            else:
+                summary = gen_viewing_summary(
+                    client_name=vs_client,
+                    prop_title=str(selected_prop.get('title', '')),
+                    prop_price=int(float(str(selected_prop.get('price', 0) or 0))),
+                    prop_rooms=str(selected_prop.get('rooms', '')),
+                    prop_region=str(selected_prop.get('region', '')),
+                    pros=vs_pros,
+                    cons=vs_cons,
+                    intention=vs_intention,
+                    notes=vs_notes
+                )
+                st.session_state['vs_result'] = summary
+
+        if 'vs_result' in st.session_state:
+            st.markdown("---")
+            st.markdown("**📄 带看小结（可直接复制发微信）**")
+            st.text_area("", value=st.session_state['vs_result'], height=420, key="vs_output")
+            st.download_button("⬇️ 下载为 TXT", data=st.session_state['vs_result'].encode('utf-8'),
+                               file_name=f"viewing_{vs_client}_{vs_date}.txt",
+                               mime="text/plain", key="vs_dl")
+
+    # =====================================================================
+    # TAB 6 — 📊 房源对比 + 市场简报
+    # =====================================================================
+    with t6:
+        st.subheader("📊 房源对比 & 市场简报")
+        
+        st.markdown("#### 1️⃣ 房源横向对比")
+        all_props = ws.get_all_records()
+        if all_props:
+            titles = [f"{r['title']} (£{r['price']})" for r in all_props]
+            selected_names = st.multiselect("选择需要对比的房源 (最多4个)", options=titles, max_selections=4)
+            
+            if st.button("🖼️ 生成对比长图", key="comp_gen"):
+                if selected_names:
+                    selected_data = [r for r in all_props if f"{r['title']} (£{r['price']})" in selected_names]
+                    comp_img = gen_comparison_image(selected_data)
+                    st.image(comp_img, use_container_width=True)
+                    
+                    buf_comp = BytesIO()
+                    comp_img.save(buf_comp, format="JPEG")
+                    st.download_button("⬇️ 下载对比图", data=buf_comp.getvalue(), 
+                                       file_name="comparison.jpg", mime="image/jpeg")
+                else:
+                    st.warning("请至少选择一个房源")
+
+        st.markdown("---")
+        st.markdown("#### 2️⃣ 伦敦租赁市场走势 (Google Trends)")
+        kw = st.text_input("输入关键词研究热度", value="London Property")
+        if st.button("📈 获取趋势数据"):
+            with st.spinner("从 Google 获取数据中..."):
+                trend_df = get_market_trends(kw)
+                if trend_df is not None and not trend_df.empty:
+                    st.line_chart(trend_df[kw])
+                    st.caption(f"过去三个月 '{kw}' 在大伦敦地区的搜索热度趋势")
+                else:
+                    st.info("💡 环境未配置 Pytrends 驱动或访问受限。请确保服务器具备代理或海外环境。")
+
+    # =====================================================================
+    # TAB 7 — 🧰 工具箱（合同提取 + 爆款关键词）
+    # =====================================================================
+    with t7:
+        st.subheader("🧰 让效率翻倍的工具箱")
+        
+        tc1, tc2 = st.columns(2)
+        
+        with tc1:
+            st.markdown("#### 📄 合同关键信息智能提取")
+            st.info("上传 PDF 合同，AI 将自动分析核心条款及潜在风险。")
+            contract_file = st.file_uploader("点击上传 PDF 合同", type="pdf")
+            if st.button("🧠 开始分析合同", type="primary"):
+                if contract_file:
+                    with st.spinner("AI 正在深度阅读合同..."):
+                        res = extract_contract(contract_file)
+                        st.markdown("---")
+                        st.markdown("**🛡️ 合同摘要与风险提示**")
+                        st.write(res)
+                else:
+                    st.warning("请先上传文件")
+
+        with tc2:
+            st.markdown("#### 📱 小红书爆款优化器")
+            st.info("根据当前趋势，给出最适合伦敦房产的标题模板与哈希标签。")
+            topic = st.selectbox("核心话题", ["新盘推介", "租房避坑", "区域测评", "搬家攻略"])
+            
+            # 模拟爆款库
+            templates = {
+                "新盘推介": ["被问爆了！伦敦{region}这个宝藏新盘终于开盘了😭", "伦敦租房｜这可能是{region}性价比的天花板了✨", "[寻房记] 住进这里，每天都被伦敦的阳光叫醒"],
+                "租房避坑": ["救命！伦敦租房这5个坑千万别踩❌", "伦敦租房避雷指南：学长学姐带血的教训", "新手必看！伦敦租房合同里藏着的“猫腻”"],
+                "区域测评": ["住在{region}是种什么体验？", "伦敦区域测评｜{region}真的值得住吗？", "大数据请把这个视频推给想住{region}的朋友！"]
+            }
+            
+            p_reg_name = st.text_input("填入关键词(如区域名)", value="Canary Wharf")
+            if st.button("✨ 随机生成爆款文案建议"):
+                st.markdown("**🔥 推荐标题:**")
+                for t in templates.get(topic, []):
+                    st.code(t.replace("{region}", p_reg_name))
+                st.markdown("**🏷️ 推荐标签:**")
+                st.write("#伦敦租房 #英国留学 #伦敦生活 #伦敦生活方式 #伦敦找房 #HaoHarbour")
+
