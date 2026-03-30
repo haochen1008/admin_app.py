@@ -689,25 +689,29 @@ def extract_contract_pro(pdf_file) -> Dict[str, Any]:
         api_key = st.secrets["OPENAI_API_KEY"]
         prompt = (
             "你是一个专业的英国房屋租赁法务助手。请分析这段 AST 合同文本并提取以下关键信息，以 JSON 格式输出。\n"
-            "JSON 结构要求：\n"
+            "重点关注：Tenant's Obligations (租客责任)、Landlord's Covenants (房东责任)、Repairing Obligations (维修责任)、"
+            "End of Tenancy (退房规定) 以及 Other Important Clauses (其他重要条款)。\n\n"
+            "JSON 结构要求（请严格遵守）：\n"
             "{\n"
             "  \"Parties\": {\"Landlord\": \"\", \"Tenant\": \"\", \"Address\": \"\"},\n"
             "  \"Financials\": {\"RentPCM\": \"\", \"Deposit\": \"\", \"DepositScheme\": \"\", \"LatePaymentFee\": \"\"},\n"
             "  \"Dates\": {\"StartDate\": \"\", \"EndDate\": \"\", \"Term\": \"\", \"BreakClause\": \"\"},\n"
-            "  \"Utilities\": {\"CouncilTax\": \"Paid by?\", \"Water\": \"Paid by?\", \"Electricity\": \"Paid by?\", \"Gas\": \"Paid by?\", \"Broadband\": \"Paid by?\"},\n"
-            "  \"Rules\": {\"Pets\": \"\", \"Smoking\": \"\", \"Subletting\": \"\", \"ProfessionalCleaning\": \"\"},\n"
-            "  \"Maintenance\": {\"TenantObligation\": \"\", \"LandlordObligation\": \"\"},\n"
+            "  \"Utilities\": {\"CouncilTax\": \"Responsibility?\", \"Water\": \"Responsibility?\", \"Electricity\": \"Responsibility?\", \"Gas\": \"Responsibility?\", \"Broadband\": \"Responsibility?\"},\n"
+            "  \"Maintenance\": {\"TenantResponsibility\": \"总结租客需承担的维修/维护责任\", \"LandlordResponsibility\": \"总结房东需承担的维修/房屋结构责任\"},\n"
+            "  \"Rules\": {\"Pets\": \"\", \"Smoking\": \"\", \"ProfessionalCleaning\": \"退房时是否需要专业清洁？\"},\n"
+            "  \"EndTenancy\": \"退房时的关键要求（如通知期、钥匙归还等）\",\n"
+            "  \"OtherClauses\": \"合同中其他值得注意的重要特殊条款或附加条款\",\n"
             "  \"Risks\": \"列出不合理或高风险的条款（如果没有请写无）\",\n"
             "  \"Summary\": \"一段话概括合同核心特征\"\n"
             "}\n"
-            "请务必保证输出是合法的 JSON，语言使用中文。"
+            "请务必保证输出是合法的 JSON，语言使用中文。必须准确识别 bills 支付方，不要轻易说未提及。"
         )
         r = requests.post("https://api.deepseek.com/chat/completions",
             json={"model": "deepseek-chat", "messages": [
                 {"role": "system", "content": prompt},
-                {"role": "user", "content": text[:12000]} # 加大内容量至 12000 字符
+                {"role": "user", "content": text[:15000]} # 加大内容量
             ]},
-            headers={"Authorization": f"Bearer {api_key}"}, timeout=45) # 增加超时时间
+            headers={"Authorization": f"Bearer {api_key}"}, timeout=60)
         
         raw_res = r.json()['choices'][0]['message']['content'].strip()
         return parse_ai_json(raw_res)
@@ -716,39 +720,69 @@ def extract_contract_pro(pdf_file) -> Dict[str, Any]:
 
 def create_contract_analysis_pdf(data: Dict[str, Any]):
     """将合同分析结果生成为专业 PDF"""
-    # 动态高度预估
-    estimated_height = 2500 
-    canvas = Image.new('RGB', (1200, int(estimated_height)), (255, 255, 255))
-    draw = ImageDraw.Draw(canvas)
     
     try:
         f_header = ImageFont.truetype("simhei.ttf", 45)
         f_section = ImageFont.truetype("simhei.ttf", 38)
         f_body = ImageFont.truetype("simhei.ttf", 32)
-        f_label = ImageFont.truetype("simhei.ttf", 32) # 加粗效果可用颜色模拟
-        f_footer = ImageFont.truetype("simhei.ttf", 24)
+        f_label = ImageFont.truetype("simhei.ttf", 32)
+        f_footer = ImageFont.truetype("simhei.ttf", 22)
         f_banner = ImageFont.truetype("simhei.ttf", 55)
         f_wm = ImageFont.truetype("simhei.ttf", 150)
     except:
         f_header = f_section = f_body = f_label = f_footer = f_banner = f_wm = ImageFont.load_default()
 
-    def draw_row(draw, y, label, val, font_label, font_val, x_label=80, x_val=400):
-        draw.text((x_label, y), f"{label}:", font=font_label, fill=(100, 100, 100))
-        draw.text((x_val, y), str(val), font=font_val, fill=(40, 40, 40))
-        return y + 60
-
-    def draw_wrapped_text(draw, text, x, y, font, max_width, fill=(60, 60, 60)):
-        if not text: return y
+    def get_lines(text, font, max_width):
+        if not text: return []
         lines = []
         current_line = ""
         for char in str(text):
             test_line = current_line + char
-            if draw.textlength(test_line, font=font) <= max_width:
+            # PIL 提供的 textlength 可准确计算宽度
+            temp_img = Image.new('RGB', (1, 1))
+            temp_draw = ImageDraw.Draw(temp_img)
+            if temp_draw.textlength(test_line, font=font) <= max_width:
                 current_line = test_line
             else:
                 lines.append(current_line)
                 current_line = char
         lines.append(current_line)
+        return lines
+
+    # 第一步：计算所有文本块的高度以确定画布总高
+    content_y = 220
+    # Sections to measure: Basic, Financials, Dates, Utilities, Maintenance, Rules, EndTenancy, Other, Risks, Summary
+    # Using a simple measurement for fixed labels, and get_lines for text blocks
+    h_map = {
+        "Parties": 320,
+        "Financials": 320,
+        "Dates": 320,
+        "Utilities": 400,
+    }
+    
+    # Text blocks that may wrap
+    m_tenant = len(get_lines(data.get('Maintenance', {}).get('TenantResponsibility', ''), f_body, 1020))
+    m_landlord = len(get_lines(data.get('Maintenance', {}).get('LandlordResponsibility', ''), f_body, 1020))
+    rules_block = 350
+    end_t = len(get_lines(data.get('EndTenancy', ''), f_body, 1020))
+    other_c = len(get_lines(data.get('OtherClauses', ''), f_body, 1020))
+    risks = len(get_lines(data.get('Risks', ''), f_body, 1020))
+    summ = len(get_lines(data.get('Summary', ''), f_body, 1020))
+    
+    total_est_height = 2000 + (m_tenant + m_landlord + end_t + other_c + risks + summ) * 50
+    
+    canvas = Image.new('RGB', (1200, int(total_est_height)), (255, 255, 255))
+    draw = ImageDraw.Draw(canvas)
+    
+    def draw_row(draw, y, label, val, font_label, font_val, x_label=80, x_val=400):
+        # 统一将 £ 替换为 GBP 避免字体渲染 □ 问题
+        safe_val = str(val).replace("£", "GBP ")
+        draw.text((x_label, y), f"{label}:", font=font_label, fill=(100, 100, 100))
+        draw.text((x_val, y), safe_val, font=font_val, fill=(40, 40, 40))
+        return y + 60
+
+    def draw_wrapped_text(draw, text, x, y, font, max_width, fill=(60, 60, 60)):
+        lines = get_lines(str(text).replace("£", "GBP "), font, max_width)
         for line in lines:
             draw.text((x, y), line, font=font, fill=fill)
             y += font.size + 15
@@ -756,11 +790,11 @@ def create_contract_analysis_pdf(data: Dict[str, Any]):
 
     # 1. 页眉 Banner
     draw.rectangle([(0, 0), (1200, 160)], fill=(26, 26, 26))
-    draw.text((60, 50), "HAO HARBOUR - 合同关键信息智能分析", font=f_banner, fill=(191, 160, 100))
+    draw.text((60, 50), "HAO HARBOUR - 合同深度智慧分析报告", font=f_banner, fill=(191, 160, 100))
     
     y = 220
     # 2. 基础信息
-    draw.text((60, y), "【 基本信息 & 双方主体 】", font=f_section, fill=(191, 160, 100))
+    draw.text((60, y), "【 基本信息 & 房屋主体 】", font=f_section, fill=(191, 160, 100))
     y += 80
     y = draw_row(draw, y, "房东 (Landlord)", data.get('Parties', {}).get('Landlord', ''), f_label, f_body)
     y = draw_row(draw, y, "租客 (Tenant)", data.get('Parties', {}).get('Tenant', ''), f_label, f_body)
@@ -772,69 +806,70 @@ def create_contract_analysis_pdf(data: Dict[str, Any]):
     y += 80
     y = draw_row(draw, y, "租金 (Rent PCM)", data.get('Financials', {}).get('RentPCM', ''), f_label, f_body)
     y = draw_row(draw, y, "押金 (Deposit)", data.get('Financials', {}).get('Deposit', ''), f_label, f_body)
-    y = draw_row(draw, y, "押金计划", data.get('Financials', {}).get('DepositScheme', ''), f_label, f_body)
+    y = draw_row(draw, y, "租期时长", data.get('Dates', {}).get('Term', ''), f_label, f_body)
     y = draw_row(draw, y, "逾期罚款", data.get('Financials', {}).get('LatePaymentFee', ''), f_label, f_body)
     
     y += 40
-    # 4. 时间节点 (Dates)
-    draw.text((60, y), "【 关键时间节点 】", font=f_section, fill=(191, 160, 100))
+    # 4. 维修责任
+    draw.text((60, y), "【 维修与维护责任 (Maintenance) 】", font=f_section, fill=(191, 160, 100))
     y += 80
-    y = draw_row(draw, y, "起租日期", data.get('Dates', {}).get('StartDate', ''), f_label, f_body)
-    y = draw_row(draw, y, "终止日期", data.get('Dates', {}).get('EndDate', ''), f_label, f_body)
-    y = draw_row(draw, y, "租期时长", data.get('Dates', {}).get('Term', ''), f_label, f_body)
-    y = draw_row(draw, y, "解约条款 (Break)", data.get('Dates', {}).get('BreakClause', ''), f_label, f_body)
+    draw.text((80, y), "租客维护义务:", font=f_label, fill=(120, 100, 80))
+    y += 60
+    y = draw_wrapped_text(draw, data.get('Maintenance', {}).get('TenantResponsibility', '无明确规定'), 100, y, f_body, 1020)
+    y += 30
+    draw.text((80, y), "房东维修责任:", font=f_label, fill=(120, 100, 80))
+    y += 60
+    y = draw_wrapped_text(draw, data.get('Maintenance', {}).get('LandlordResponsibility', '遵循法律规定'), 100, y, f_body, 1020)
     
     y += 40
     # 5. 费用承担 (Utilities)
-    draw.text((60, y), "【 杂费/Utilities 承担方 】", font=f_section, fill=(191, 160, 100))
+    draw.text((60, y), "【 杂费/Utilities 支付责任 】", font=f_section, fill=(191, 160, 100))
     y += 80
     utils = data.get('Utilities', {})
     y = draw_row(draw, y, "Council Tax", utils.get('CouncilTax', ''), f_label, f_body)
     y = draw_row(draw, y, "水费 (Water)", utils.get('Water', ''), f_label, f_body)
-    y = draw_row(draw, y, "电费 (Electricity)", utils.get('Electricity', ''), f_label, f_body)
-    y = draw_row(draw, y, "燃气费 (Gas)", utils.get('Gas', ''), f_label, f_body)
-    y = draw_row(draw, y, "宽带 (Broadband)", utils.get('Broadband', ''), f_label, f_body)
+    y = draw_row(draw, y, "电费/燃气费", f"{utils.get('Electricity','')} / {utils.get('Gas','')}", f_label, f_body)
     
     y += 40
-    # 6. 住户守则
-    draw.text((60, y), "【 住户守则 & 限制 】", font=f_section, fill=(191, 160, 100))
+    # 6. 退房规定与解约 (End of Tenancy)
+    draw.text((60, y), "【 解约条款与退房规定 】", font=f_section, fill=(191, 160, 100))
     y += 80
-    rules = data.get('Rules', {})
-    y = draw_row(draw, y, "宠物政策", rules.get('Pets', ''), f_label, f_body)
-    y = draw_row(draw, y, "禁止吸烟", rules.get('Smoking', ''), f_label, f_body)
-    y = draw_row(draw, y, "转租规定", rules.get('Subletting', ''), f_label, f_body)
-    y = draw_row(draw, y, "专业清洁要求", rules.get('ProfessionalCleaning', ''), f_label, f_body)
+    y = draw_row(draw, y, "Break Clause", data.get('Dates', {}).get('BreakClause', '未见'), f_label, f_body)
+    y = draw_wrapped_text(draw, data.get('EndTenancy', '按法律标准退房'), 100, y, f_body, 1020)
     
-    y += 40
-    # 7. 风险提示 & 总结
-    draw.text((60, y), "【 专家建议与风险提示 】", font=f_section, fill=(220, 20, 60))
+    y += 50
+    # 7. 其他重要条款
+    draw.text((60, y), "【 其他重要约定 (Other Clauses) 】", font=f_section, fill=(50, 80, 120))
     y += 80
-    draw.text((80, y), "⚠️ 合同潜在风险点:", font=f_label, fill=(220, 20, 60))
-    y += 60
-    y = draw_wrapped_text(draw, data.get('Risks', '无'), 100, y, f_body, 1020, fill=(200, 20, 20))
-    y += 40
-    draw.text((80, y), "📝 核心概括:", font=f_label, fill=(40, 40, 40))
-    y += 60
-    y = draw_wrapped_text(draw, data.get('Summary', '无'), 100, y, f_body, 1020, fill=(60, 60, 60))
+    y = draw_wrapped_text(draw, data.get('OtherClauses', '无显著特殊条款'), 100, y, f_body, 1020)
 
-    # 8. 水印
+    y += 50
+    # 8. 风险建议
+    draw.text((60, y), "【 核心风险提示 】", font=f_section, fill=(220, 20, 60))
+    y += 80
+    y = draw_wrapped_text(draw, data.get('Risks', '无显著高危条款'), 100, y, f_body, 1020, fill=(200, 20, 20))
+    
+    y += 50
+    # 9. 水印
     wm_layer = Image.new('RGBA', canvas.size, (0, 0, 0, 0))
     wm_draw = ImageDraw.Draw(wm_layer)
     wm_color = (180, 180, 180, 75)
     for i in range(0, canvas.size[1], 1000):
         wm_draw.text((150, i + 400), "Hao Harbour Analysis", font=f_wm, fill=wm_color)
-    rotated_wm = wm_layer.rotate(30, expand=False)
+    rotated_wm = wm_layer.rotate(35, expand=False)
     canvas.paste(rotated_wm, (0, 0), rotated_wm)
 
-    # 9. 页脚
-    footer_height = 200
-    total_y = y + 100 + footer_height
+    # 10. 页脚
+    footer_height = 250
+    total_y = y + 150 + footer_height
     final_canvas = canvas.crop((0, 0, 1200, int(total_y)))
     f_draw = ImageDraw.Draw(final_canvas)
     f_y = total_y - footer_height
     f_draw.rectangle([(0, f_y), (1200, total_y)], fill=(245, 245, 245))
     f_draw.text((60, f_y + 40), f"WeChat: {VIEWING_CONTACT_WECHAT} | Contact: {VIEWING_CONTACT_PHONE}", font=f_body, fill=(100, 100, 100))
-    f_draw.text((60, f_y + 100), "此分析仅由 AI 生成，旨在协助阅读并不能替代专业法律建议。请务必自行复核原文。", font=f_footer, fill=(150, 150, 150))
+    
+    disclaimer = "本报告旨在协助合同阅读，Hao Haobour方对应内容不承担任何法律担保责任。请务必结合合同原文并咨询法律专家。"
+    draw_wrapped_text(f_draw, disclaimer, 60, f_y + 110, f_footer, 1080, fill=(150, 150, 150))
 
     return final_canvas
 
@@ -1366,55 +1401,70 @@ if ws:
             st.markdown("#### 📄 合同关键信息智能提取")
             st.info("上传 PDF 合同，AI 将自动分析核心条款及潜在风险。")
             contract_file = st.file_uploader("点击上传 PDF 合同", type="pdf")
-            if st.button("🧠 开始分析合同", type="primary"):
+            if st.button("🧠 开始深度分析合同", type="primary"):
                 if contract_file:
-                    with st.spinner("AI 正在深度阅读合同(约30-45秒)..."):
+                    with st.spinner("AI 正在深度研读条款并识别责任归属 (约45-60秒)..."):
                         res = extract_contract_pro(contract_file)
                         if "error" in res:
                             st.error(res["error"])
                         else:
-                            st.session_state['contract_data'] = res
+                            # 将提取结果存入可编辑的任务状态
+                            st.session_state['editable_contract'] = res
                 else:
                     st.warning("请先上传文件")
 
-            if 'contract_data' in st.session_state:
-                res = st.session_state['contract_data']
+            if 'editable_contract' in st.session_state:
                 st.markdown("---")
-                st.markdown("**🛡️ 合同核心摘要与风险评估**")
+                st.subheader("📝 智能分析预览与人工校对")
+                st.info("AI 已提取关键条款，请检查并根据实际情况修改下方内容。确认无误后点击最下方的生成 PDF。")
                 
-                # 核心财务指标
-                m1, m2 = st.columns(2)
-                fin = res.get('Financials', {})
-                m1.metric("月租 (Rent PCM)", fin.get('RentPCM', '未知'))
-                m2.metric("押金 (Deposit)", fin.get('Deposit', '未知'))
+                ec = st.session_state['editable_contract']
                 
-                with st.expander("🔍 详细条款穿透 (Detailed Analysis)", expanded=True):
-                    st.write(f"🏠 **地址**: {res.get('Parties', {}).get('Address', '未知')}")
-                    st.write(f"📅 **租期**: {res.get('Dates', {}).get('Term', '未知')} ({res.get('Dates', {}).get('StartDate', '')} 至 {res.get('Dates', {}).get('EndDate', '')})")
-                    st.write(f"🚪 **Break Clause**: {res.get('Dates', {}).get('BreakClause', '未见')}")
-                    
-                    st.markdown("**💰 杂费承担 (Utilities)**")
-                    ut = res.get('Utilities', {})
-                    if ut:
-                        cols = st.columns(len(ut))
-                        for i, (k, v) in enumerate(ut.items()):
-                            cols[i].caption(k)
-                            cols[i].write(v)
+                # 开始构建可编辑表单
+                with st.expander("👤 1. 双方主体与地址 (Parties)", expanded=True):
+                    c1, c2 = st.columns(2)
+                    ec['Parties']['Landlord'] = c1.text_input("房东 (Landlord)", ec['Parties'].get('Landlord',''))
+                    ec['Parties']['Tenant'] = c2.text_input("租客 (Tenant)", ec['Parties'].get('Tenant',''))
+                    ec['Parties']['Address'] = st.text_input("房屋地址 (Address)", ec['Parties'].get('Address',''))
 
-                    st.markdown("**🛡️ 风险提示 (Risks)**")
-                    st.error(res.get('Risks', '未发现显著风险'))
-                    
-                    st.markdown("**📋 专家总结**")
-                    st.info(res.get('Summary', '无'))
-                
-                if st.button("🎨 导出分析报告 PDF", key="contract_pdf_gen", use_container_width=True):
-                    with st.spinner("正在排版并生成 PDF..."):
-                        p_img = create_contract_analysis_pdf(res)
+                with st.expander("💰 2. 财务核心条款 (Financials)", expanded=True):
+                    f1, f2, f3 = st.columns(3)
+                    ec['Financials']['RentPCM'] = f1.text_input("月租 (Rent PCM)", ec['Financials'].get('RentPCM',''))
+                    ec['Financials']['Deposit'] = f2.text_input("押金 (Deposit)", ec['Financials'].get('Deposit',''))
+                    ec['Dates']['Term'] = f3.text_input("租期时长 (Term)", ec['Dates'].get('Term',''))
+                    ec['Financials']['LatePaymentFee'] = st.text_input("逾期罚款标准", ec['Financials'].get('LatePaymentFee',''))
+
+                with st.expander("🔧 3. 维修与维护责任 (Maintenance)", expanded=True):
+                    ec['Maintenance']['TenantResponsibility'] = st.text_area("租客维护义务", ec['Maintenance'].get('TenantResponsibility',''), height=100)
+                    ec['Maintenance']['LandlordResponsibility'] = st.text_area("房东维修责任", ec['Maintenance'].get('LandlordResponsibility',''), height=100)
+
+                with st.expander("⚡ 4. 杂费支付责任 (Utilities)", expanded=True):
+                    st.caption("请确认各杂费的支付方（如 Tenant, Landlord 或 Included in Rent）")
+                    u1, u2, u3 = st.columns(3)
+                    ec['Utilities']['CouncilTax'] = u1.text_input("Council Tax", ec['Utilities'].get('CouncilTax',''))
+                    ec['Utilities']['Water'] = u2.text_input("水费 (Water)", ec['Utilities'].get('Water',''))
+                    ec['Utilities']['Electricity'] = u3.text_input("电/气 (Elec/Gas)", ec['Utilities'].get('Electricity',''))
+
+                with st.expander("🛑 5. 退房与特殊条款 (End & Special)", expanded=True):
+                    ec['Dates']['BreakClause'] = st.text_input("解约条款 (Break Clause)", ec['Dates'].get('BreakClause',''))
+                    ec['EndTenancy'] = st.text_area("退房规定 (End of Tenancy)", ec['EndTenancy'], height=80)
+                    ec['OtherClauses'] = st.text_area("其他重要特殊条款", ec['OtherClauses'], height=100)
+
+                with st.expander("⚠️ 6. 风险观察与专家总结 (Summary)", expanded=True):
+                    ec['Risks'] = st.text_area("⚠️ 潜在风险点", ec['Risks'], height=100)
+                    ec['Summary'] = st.text_area("📝 核心总结", ec['Summary'], height=80)
+
+                st.markdown("---")
+                if st.button("🎨 生成并导出专业分析 PDF", key="final_ca_gen", use_container_width=True):
+                    with st.spinner("正在排版并生成 PDF (含水印)..."):
+                        # 使用编辑后的最新数据生成 PDF
+                        p_img = create_contract_analysis_pdf(ec)
                         buf_ca = BytesIO()
                         p_img.save(buf_ca, format="PDF", resolution=100.0)
-                        st.download_button("⬇️ 立即下载分析 PDF", data=buf_ca.getvalue(), 
+                        st.download_button("⬇️ 立即下载正式版分析 PDF", data=buf_ca.getvalue(), 
                                            file_name=f"Contract_Report_{datetime.now().strftime('%Y%m%d')}.pdf", 
-                                           mime="application/pdf", key="dl_ca_pdf")
+                                           mime="application/pdf", key="final_dl_pdf")
+                        st.success("✅ PDF 已生成，请点击上方按钮下载。")
 
         with tc2:
             st.markdown("#### 📱 小红书爆款优化器")
