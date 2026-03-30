@@ -492,24 +492,42 @@ def gen_pro_viewing_summary(client_name: str, date: str, address: str, facing: s
 
 def create_viewing_report_pdf(client_name, date_str, address, facing, items_data, remarks, photos):
     """使用 PIL 生成长图并保存为 PDF"""
-    # 动态计算高度
-    total_items = sum(len(v) for v in items_data.values())
-    photo_rows = (len(photos) + 1) // 2
-    canvas_height = 800 + (total_items * 60) + (len(items_data) * 100) + (photo_rows * 450) + 400
-    
-    canvas = Image.new('RGB', (1200, int(canvas_height)), (255, 255, 255))
-    draw = ImageDraw.Draw(canvas)
-    
     try:
-        f_title = ImageFont.truetype("simhei.ttf", 60)
         f_header = ImageFont.truetype("simhei.ttf", 40)
         f_body = ImageFont.truetype("simhei.ttf", 32)
         f_star = ImageFont.truetype("simhei.ttf", 35)
         f_footer = ImageFont.truetype("simhei.ttf", 24)
         f_banner = ImageFont.truetype("simhei.ttf", 50)
+        f_wm = ImageFont.truetype("simhei.ttf", 120)
     except:
-        f_title = f_header = f_body = f_star = f_footer = f_banner = ImageFont.load_default()
+        f_header = f_body = f_star = f_footer = f_banner = f_wm = ImageFont.load_default()
 
+    def draw_wrapped_text(draw, text, x, y, font, max_width, fill=(80, 80, 80)):
+        if not text: return y
+        lines = []
+        current_line = ""
+        for char in text:
+            test_line = current_line + char
+            if draw.textlength(test_line, font=font) <= max_width:
+                current_line = test_line
+            else:
+                lines.append(current_line)
+                current_line = char
+        lines.append(current_line)
+        for line in lines:
+            draw.text((x, y), line, font=font, fill=fill)
+            y += font.size + 15
+        return y
+
+    # 预估高度：基础文本 + 评分项 + 备注自动换行预估 + 照片
+    # 每个备注预估占用额外 100 像素
+    total_items = sum(len(v) for v in items_data.values())
+    photo_rows = (len(photos) + 1) // 2
+    estimated_height = 1000 + (total_items * 65) + (len(items_data) * 200) + (photo_rows * 460) + 600
+    
+    canvas = Image.new('RGB', (1200, int(estimated_height)), (255, 255, 255))
+    draw = ImageDraw.Draw(canvas)
+    
     # 1. 页眉 Banner
     draw.rectangle([(0, 0), (1200, 150)], fill=(26, 26, 26))
     draw.text((60, 45), "HAO HARBOUR - 专业带看报告", font=f_banner, fill=(191, 160, 100))
@@ -518,73 +536,76 @@ def create_viewing_report_pdf(client_name, date_str, address, facing, items_data
     y = 190
     draw.text((60, y), f"客户姓名: {client_name}", font=f_body, fill=(50, 50, 50))
     draw.text((600, y), f"看房日期: {date_str}", font=f_body, fill=(50, 50, 50))
-    y += 60
+    y += 65
     draw.text((60, y), f"房屋地址: {address}", font=f_body, fill=(50, 50, 50))
-    y += 60
+    y += 65
     draw.text((60, y), f"房屋朝向: {facing}", font=f_body, fill=(50, 50, 50))
-    y += 60
+    y += 65
     draw.text((60, y), f"联系方式: WeChat {VIEWING_CONTACT_WECHAT} | {VIEWING_CONTACT_PHONE}", font=f_body, fill=(191, 160, 100))
     
-    y += 40
+    y += 50
     draw.line([(60, y), (1140, y)], fill=(200, 200, 200), width=2)
-    y += 40
+    y += 50
 
     # 3. 核心评估板块
     for section, s_items in items_data.items():
         draw.text((60, y), f"【{section}】", font=f_header, fill=(191, 160, 100))
-        y += 70
+        y += 80
         for item, score in s_items.items():
-            # 颜色逻辑
             star_color = (34, 139, 34) if score >= 4 else ((255, 140, 0) if score == 3 else (220, 20, 60))
             draw.text((80, y), item, font=f_body, fill=(80, 80, 80))
-            draw.text((600, y), "★" * score + "☆" * (5 - score), font=f_star, fill=star_color)
-            y += 60
+            draw.text((630, y), "★" * score + "☆" * (5 - score), font=f_star, fill=star_color)
+            y += 65
         
         if remarks.get(section):
-            draw.text((80, y), f"备注: {remarks[section]}", font=f_body, fill=(120, 120, 120))
-            y += 60
-        y += 40
+            y = draw_wrapped_text(draw, f"备注: {remarks[section]}", 80, y, f_body, 1040, fill=(110, 110, 110))
+        y += 45
 
     # 4. 总体备注
     if remarks.get('General'):
         draw.text((60, y), "总体备注:", font=f_header, fill=(50, 50, 50))
+        y += 70
+        y = draw_wrapped_text(draw, remarks['General'], 80, y, f_body, 1040, fill=(80, 80, 80))
         y += 60
-        draw.text((80, y), remarks['General'], font=f_body, fill=(80, 80, 80))
-        y += 100
 
     # 5. 照片展示
     if photos:
         draw.text((60, y), "现场照片:", font=f_header, fill=(50, 50, 50))
-        y += 70
+        y += 80
         for i, photo_data in enumerate(photos):
             try:
                 img = Image.open(photo_data).convert("RGB")
-                # 保持比例缩放
-                img.thumbnail((500, 400))
+                img.thumbnail((520, 420))
                 px = 80 + (i % 2) * 540
-                py = y + (i // 2) * 450
+                py = y + (i // 2) * 460
                 canvas.paste(img, (px, py))
             except: pass
-        y += ((len(photos) + 1) // 2) * 450 + 50
+        y += photo_rows * 460 + 80
 
-    # 6. 水印
+    # 6. 斜向加深水印 (与房子海报一致)
     wm_layer = Image.new('RGBA', canvas.size, (0, 0, 0, 0))
     wm_draw = ImageDraw.Draw(wm_layer)
-    for i in range(0, canvas.size[1], 800):
-        wm_draw.text((200, i + 300), "Hao Harbour", font=f_star, fill=(150, 150, 150, 60))
-    rotated_wm = wm_layer.rotate(30, expand=False)
+    # 使用白色/浅灰色高透明度水印，多处覆盖
+    wm_color = (180, 180, 180, 70) 
+    for row in range(0, canvas.size[1], 1000):
+        for col in range(0, 1200, 600):
+            wm_draw.text((col + 50, row + 400), "Hao Harbour", font=f_wm, fill=wm_color)
+    
+    rotated_wm = wm_layer.rotate(35, expand=False)
     canvas.paste(rotated_wm, (0, 0), rotated_wm)
 
     # 7. 页脚免责声明
-    footer_y = canvas.size[1] - 250
-    draw.rectangle([(0, footer_y), (1200, canvas.size[1])], fill=(245, 245, 245))
-    # 自动换行免责声明
+    footer_height = 280
+    pdf_final_height = y + footer_height
+    final_canvas = canvas.crop((0, 0, 1200, int(pdf_final_height)))
+    final_draw = ImageDraw.Draw(final_canvas)
+    
+    footer_y = pdf_final_height - footer_height
+    final_draw.rectangle([(0, footer_y), (1200, pdf_final_height)], fill=(245, 245, 245))
     words = VIEWING_DISCLAIMER
-    line_len = 45
-    for i in range(0, len(words), line_len):
-        draw.text((60, footer_y + 40 + (i // line_len) * 35), words[i:i+line_len], font=f_footer, fill=(150, 150, 150))
+    draw_wrapped_text(final_draw, words, 60, footer_y + 40, f_footer, 1080, fill=(140, 140, 140))
 
-    return canvas
+    return final_canvas
 
 # --- 4f. 房源对比图生成 (PIL) ---
 def gen_comparison_image(selected_props: List[Dict]) -> Image.Image:
