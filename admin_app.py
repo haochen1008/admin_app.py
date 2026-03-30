@@ -23,6 +23,28 @@ except ImportError:
     TrendReq = None
 
 
+# --- 1.1 报告生成器常量 ---
+VIEWING_CONTACT_WECHAT = "HaoHarbour"
+VIEWING_CONTACT_PHONE = "07450912493"
+VIEWING_DISCLAIMER = (
+    "本报告仅基于带看人员在现场的个人观察，不构成任何形式的法律建议、房屋测量报告或合同要约。"
+    "带看人员对隐藏缺陷、房屋结构问题或未来环境变化不承担法律责任，请客户在签约前务必自行核实关键信息。"
+)
+
+VIEWING_DEFAULT_INTERIOR = [
+    "采光/通透度 (Natural Light)", "装修/家具维护 (Condition)", "窗户隔音/保暖 (Window Insulation)",
+    "墙体/窗框防潮 (Damp/Mould)", "手机信号 (Signal)", "水压/排水速度 (Water Pressure)",
+    "储物/收纳空间 (Storage)", "家电新旧 (Appliances)", "味道 (Smell)"
+]
+VIEWING_DEFAULT_BUILDING = [
+    "24h 前台/安全感 (Concierge)", "快递代收系统 (Parcel Handling)", "公区卫生/气味 (Cleanliness)",
+    "电梯数量/速度 (Lift Status)", "公共设施 (Gym/Lounge)"
+]
+VIEWING_DEFAULT_NEIGHBORHOOD = [
+    "居住安静程度 (Quietness)", "街道整洁/安全 (Street Vibe)", "生活配套便利 (Shops/Cafe)",
+    "交通便捷程度 (Transport)", "施工/脚手架干扰 (Construction)"
+]
+
 # --- 1. 初始化配置 ---
 cloudinary.config(
     cloud_name = st.secrets["cloudinary"]["cloud_name"],
@@ -215,6 +237,37 @@ def scrape_rightmove(url):
                 elif floorplans:
                     final_images.append(floorplans[0])
                 
+                # 提取最近的3个地铁/火车站和具体经纬度
+                stations_data = []
+                if 'location' in p_data and 'stations' in p_data['location']:
+                    stations_data = p_data['location']['stations']
+                elif 'stations' in p_data:
+                    stations_data = p_data['stations']
+                
+                nearest_stations = []
+                for s in stations_data[:3]:
+                    if isinstance(s, dict) and s.get('name'):
+                        s_name = s['name']
+                        s_dist = s.get('distance', '')
+                        s_unit = s.get('unit', 'mi')
+                        if s_dist != '':
+                            # Format to 1 decimal place if float
+                            try:
+                                d_val = float(s_dist)
+                                s_dist_fmt = f"{d_val:.1f}"
+                            except ValueError:
+                                s_dist_fmt = str(s_dist)
+                            nearest_stations.append(f"{s_name} ({s_dist_fmt}{s_unit})")
+                        else:
+                            nearest_stations.append(s_name)
+                stations_str = ", ".join(nearest_stations)
+                
+                # Extract exact coordinates for precision mapping
+                lat, lng = "", ""
+                if 'location' in p_data:
+                    lat = p_data['location'].get('latitude', '')
+                    lng = p_data['location'].get('longitude', '')
+                
                 # 智能分区：从房源地址/邮编自动判断伦敦区域
                 address_info: Any = p_data.get('address', {})
                 postcode: str = ""
@@ -230,7 +283,10 @@ def scrape_rightmove(url):
                 return {
                     'title': title, 'price': price, 'rooms': rooms_str,
                     'description': desc, 'images': final_images,
-                    'region': auto_region, 'postcode': postcode
+                    'region': auto_region, 'postcode': postcode,
+                    'station': stations_str,
+                    'lat': lat,
+                    'lng': lng
                 }, None
         return None, "无法解析数据，请检查链接是否为房源页"
     except Exception as e:
@@ -399,34 +455,136 @@ def gen_douyin_script(title: str, price: int, rooms: str, region: str, desc: str
     except:
         return f"🎬 【{region}·{rooms}】仅£{price}/月！\n{title}，地段好、装修新，稀缺好房等你！\n👉 点赞收藏，私信了解详情！"
 
-# --- 4e. 带看小结生成 ---
-def gen_viewing_summary(client_name: str, prop_title: str, prop_price: int,
-                        prop_rooms: str, prop_region: str,
-                        pros: List[str], cons: List[str],
-                        intention: str, notes: str) -> str:
-    pros_block = "\n".join(f"  • {p}" for p in pros) if pros else "  • 暂无"
-    cons_block = "\n".join(f"  • {c}" for c in cons) if cons else "  • 暂无"
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    return f"""━━━━━━━━━━━━━━━━━━━━━━━━
-🏠 带看小结 | Viewing Summary
-━━━━━━━━━━━━━━━━━━━━━━━━
-📅 日期：{date_str}   👤 客户：{client_name}
-📍 房源：{prop_title}
-💰 月租：£{prop_price} PCM   🛏 户型：{prop_rooms}   📌 区域：{prop_region}
 
-✅ 亮点
-{pros_block}
+# --- 4e. 专业带看报告生成器 (Text & PDF) ---
+def gen_pro_viewing_summary(client_name: str, date: str, address: str, facing: str, items: Dict[str, Dict[str, int]], remarks: Dict[str, str]) -> str:
+    """生成带 Emoji 和颜色区分的结构化文案"""
+    summary = [
+        f"━━━━━━━━━━━━━━━━━━━━━━━━",
+        f"🏠 专业带看报告 | Viewing Report",
+        f"━━━━━━━━━━━━━━━━━━━━━━━━",
+        f"👤 客户：{client_name}",
+        f"📅 日期：{date}",
+        f"📍 地址：{address}",
+        f"🧭 朝向：{facing}",
+        f"📞 联系：Wechat {VIEWING_CONTACT_WECHAT} | {VIEWING_CONTACT_PHONE}",
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    ]
+    
+    for section, section_items in items.items():
+        summary.append(f"【{section}】")
+        for item, score in section_items.items():
+            # 评分 4-5 为绿色，3 为黄色，1-2 为红色
+            emoji = "🟢" if score >= 4 else ("🟡" if score == 3 else "🔴")
+            stars = "⭐" * score
+            summary.append(f" {emoji} {item}: {stars}")
+        if remarks.get(section):
+            summary.append(f" 📝 备注: {remarks[section]}")
+        summary.append("")
 
-⚠️ 注意事项
-{cons_block}
+    if remarks.get('General'):
+        summary.append(f"💬 总体评价: {remarks['General']}\n")
+    
+    summary.append("⚠️ 免责声明:")
+    summary.append(VIEWING_DISCLAIMER)
+    summary.append("━━━━━━━━━━━━━━━━━━━━━━━━")
+    return "\n".join(summary)
 
-💬 客户意向：{intention}
-📝 备注：{notes if notes else '无'}
+def create_viewing_report_pdf(client_name, date_str, address, facing, items_data, remarks, photos):
+    """使用 PIL 生成长图并保存为 PDF"""
+    # 动态计算高度
+    total_items = sum(len(v) for v in items_data.values())
+    photo_rows = (len(photos) + 1) // 2
+    canvas_height = 800 + (total_items * 60) + (len(items_data) * 100) + (photo_rows * 450) + 400
+    
+    canvas = Image.new('RGB', (1200, int(canvas_height)), (255, 255, 255))
+    draw = ImageDraw.Draw(canvas)
+    
+    try:
+        f_title = ImageFont.truetype("simhei.ttf", 60)
+        f_header = ImageFont.truetype("simhei.ttf", 40)
+        f_body = ImageFont.truetype("simhei.ttf", 32)
+        f_star = ImageFont.truetype("simhei.ttf", 35)
+        f_footer = ImageFont.truetype("simhei.ttf", 24)
+        f_banner = ImageFont.truetype("simhei.ttf", 50)
+    except:
+        f_title = f_header = f_body = f_star = f_footer = f_banner = ImageFont.load_default()
 
-📋 建议跟进：3天内联系确认意向 → 如感兴趣准备 Referencing 材料清单
+    # 1. 页眉 Banner
+    draw.rectangle([(0, 0), (1200, 150)], fill=(26, 26, 26))
+    draw.text((60, 45), "HAO HARBOUR - 专业带看报告", font=f_banner, fill=(191, 160, 100))
+    
+    # 2. 基本信息
+    y = 190
+    draw.text((60, y), f"客户姓名: {client_name}", font=f_body, fill=(50, 50, 50))
+    draw.text((600, y), f"看房日期: {date_str}", font=f_body, fill=(50, 50, 50))
+    y += 60
+    draw.text((60, y), f"房屋地址: {address}", font=f_body, fill=(50, 50, 50))
+    y += 60
+    draw.text((60, y), f"房屋朝向: {facing}", font=f_body, fill=(50, 50, 50))
+    y += 60
+    draw.text((60, y), f"联系方式: WeChat {VIEWING_CONTACT_WECHAT} | {VIEWING_CONTACT_PHONE}", font=f_body, fill=(191, 160, 100))
+    
+    y += 40
+    draw.line([(60, y), (1140, y)], fill=(200, 200, 200), width=2)
+    y += 40
 
-— Hao Harbour 独家中介服务
-━━━━━━━━━━━━━━━━━━━━━━━━"""
+    # 3. 核心评估板块
+    for section, s_items in items_data.items():
+        draw.text((60, y), f"【{section}】", font=f_header, fill=(191, 160, 100))
+        y += 70
+        for item, score in s_items.items():
+            # 颜色逻辑
+            star_color = (34, 139, 34) if score >= 4 else ((255, 140, 0) if score == 3 else (220, 20, 60))
+            draw.text((80, y), item, font=f_body, fill=(80, 80, 80))
+            draw.text((600, y), "★" * score + "☆" * (5 - score), font=f_star, fill=star_color)
+            y += 60
+        
+        if remarks.get(section):
+            draw.text((80, y), f"备注: {remarks[section]}", font=f_body, fill=(120, 120, 120))
+            y += 60
+        y += 40
+
+    # 4. 总体备注
+    if remarks.get('General'):
+        draw.text((60, y), "总体备注:", font=f_header, fill=(50, 50, 50))
+        y += 60
+        draw.text((80, y), remarks['General'], font=f_body, fill=(80, 80, 80))
+        y += 100
+
+    # 5. 照片展示
+    if photos:
+        draw.text((60, y), "现场照片:", font=f_header, fill=(50, 50, 50))
+        y += 70
+        for i, photo_data in enumerate(photos):
+            try:
+                img = Image.open(photo_data).convert("RGB")
+                # 保持比例缩放
+                img.thumbnail((500, 400))
+                px = 80 + (i % 2) * 540
+                py = y + (i // 2) * 450
+                canvas.paste(img, (px, py))
+            except: pass
+        y += ((len(photos) + 1) // 2) * 450 + 50
+
+    # 6. 水印
+    wm_layer = Image.new('RGBA', canvas.size, (0, 0, 0, 0))
+    wm_draw = ImageDraw.Draw(wm_layer)
+    for i in range(0, canvas.size[1], 800):
+        wm_draw.text((200, i + 300), "Hao Harbour", font=f_star, fill=(150, 150, 150, 60))
+    rotated_wm = wm_layer.rotate(30, expand=False)
+    canvas.paste(rotated_wm, (0, 0), rotated_wm)
+
+    # 7. 页脚免责声明
+    footer_y = canvas.size[1] - 250
+    draw.rectangle([(0, footer_y), (1200, canvas.size[1])], fill=(245, 245, 245))
+    # 自动换行免责声明
+    words = VIEWING_DISCLAIMER
+    line_len = 45
+    for i in range(0, len(words), line_len):
+        draw.text((60, footer_y + 40 + (i // line_len) * 35), words[i:i+line_len], font=f_footer, fill=(150, 150, 150))
+
+    return canvas
 
 # --- 4f. 房源对比图生成 (PIL) ---
 def gen_comparison_image(selected_props: List[Dict]) -> Image.Image:
@@ -513,6 +671,16 @@ def extract_contract(pdf_file) -> str:
         return f"❌ 提取失败: {e}"
 
 
+# --- 初始化带看报告状态 ---
+if 'viewing_items' not in st.session_state:
+    st.session_state['viewing_items'] = {
+        'Interior': {item: 5 for item in VIEWING_DEFAULT_INTERIOR},
+        'Building': {item: 5 for item in VIEWING_DEFAULT_BUILDING},
+        'Neighborhood': {item: 5 for item in VIEWING_DEFAULT_NEIGHBORHOOD}
+    }
+    st.session_state['viewing_remarks'] = {'Interior': '', 'Building': '', 'Neighborhood': '', 'General': ''}
+    st.session_state['viewing_photos'] = []
+
 ws = get_ws()
 if ws:
     t1, t2, t3, t4, t5, t6, t7 = st.tabs([
@@ -589,7 +757,11 @@ if ws:
                         img_url = upload_res['secure_url']
                         
                         now = datetime.now().strftime("%Y-%m-%d")
-                        ws.append_row([now, p_name, p_reg, p_rooms, int(p_price), img_url, zh_desc, 0, 0])
+                        p_station = rm_data.get('station', '')
+                        p_lat = rm_data.get('lat', '')
+                        p_lng = rm_data.get('lng', '')
+                        # Index 10 is reserved for manual walkingMinutes to ensure backward compatibility
+                        ws.append_row([now, p_name, p_reg, p_rooms, int(p_price), img_url, zh_desc, 0, 0, p_station, "", p_lat, p_lng])
                         st.success("发布成功！海报已存档。")
                         st.rerun()
 
@@ -716,10 +888,13 @@ if ws:
                             # AI 文案
                             desc_val = scraped_data.get('description', '')
                             desc_str: str = str(desc_val)
+                            p_station = str(scraped_data.get('station', ''))
+                            p_lat = str(scraped_data.get('lat', ''))
+                            p_lng = str(scraped_data.get('lng', ''))
                             ai_copy = call_smart_ai(desc_str[:1000]) if desc_str else "最新豪宅首发，欢迎详询！"
                             # 写入数据库
                             current_date = datetime.now().strftime("%Y-%m-%d")
-                            ws.append_row([current_date, p_title, final_reg, rooms_val, p_price, img_url_cloud, ai_copy, 0, 0]) # type: ignore
+                            ws.append_row([current_date, p_title, final_reg, rooms_val, p_price, img_url_cloud, ai_copy, 0, 0, p_station, "", p_lat, p_lng]) # type: ignore
                             success_count = success_count + 1
                             st.success(f"✅ [{i+1}] {p_title} ({final_reg}) 发布成功！")
                         except Exception as e:
@@ -833,74 +1008,146 @@ if ws:
                                file_name=f"hao_harbour_{mp_name[:15]}.zip",
                                mime="application/zip", key="dl_zip")
 
+
     # =====================================================================
-    # TAB 5 — 👁️ 带看小结生成器
+    # TAB 5 — 👁️ 专业带看报告生成器
     # =====================================================================
     with t5:
-        st.subheader("👁️ 带看小结生成器")
-        st.info("填写看房信息，一键生成可直接发给客户的带看小结（中文版）。")
+        st.subheader("👁️ 专业带看报告生成器 (Pro Viewing Report)")
+        st.info("填写深度测评信息，生成带星级评分的结构化报告及专业 PDF。")
 
+        # 1. 基础信息
+        st.markdown("#### 1️⃣ 基本信息")
         vs_c1, vs_c2 = st.columns(2)
-        vs_client = vs_c1.text_input("👤 客户姓名", placeholder="例：王女士")
-        vs_date   = vs_c2.date_input("📅 看房日期", value=datetime.today())
+        vs_client = vs_c1.text_input("👤 客户姓名", placeholder="例：王女士", key="vr_client")
+        vs_date = vs_c2.date_input("📅 看房日期", value=datetime.today(), key="vr_date")
+        
+        vs_addr = st.text_input("🏠 房子地址", placeholder="例：Canary Wharf, E14", key="vr_addr")
+        vs_facing = st.text_input("🧭 房屋朝向", placeholder="例：坐北朝南 (South Facing)", key="vr_facing")
+        
+        st.write(f"📌 **固定展示联系方式**: 🟢 WeChat: {VIEWING_CONTACT_WECHAT} | 📞 Contact: {VIEWING_CONTACT_PHONE}")
 
-        # 从已发布房源中选择
-        all_props = ws.get_all_records()
-        prop_titles = [f"{r.get('title','?')} — £{r.get('price','?')} ({r.get('region','?')})" for r in all_props]
-        vs_prop_idx = st.selectbox("🏠 看的是哪套房源？", options=range(len(prop_titles)),
-                                   format_func=lambda x: prop_titles[x] if prop_titles else "暂无房源",
-                                   key="vs_prop") if prop_titles else None
+        st.markdown("---")
 
-        selected_prop = all_props[vs_prop_idx] if vs_prop_idx is not None and all_props else {}
+        # 2. 三大核心评估板块
+        st.markdown("#### 2️⃣ 核心评估板块 (1-5 星评分)")
+        
+        sections = {
+            'Interior': '🏠 室内深度评估 (Interior)',
+            'Building': '🏢 大楼管理评估 (Building)',
+            'Neighborhood': '🌳 周边微环境 (Neighborhood)'
+        }
+        
+        for section_key, section_label in sections.items():
+            with st.expander(section_label, expanded=True):
+                # 动态增减项目
+                cols = st.columns([4, 3, 1])
+                cols[0].markdown("**项目名称**")
+                cols[1].markdown("**评分 (1-5 星)**")
+                
+                # 获取当前板块的项目
+                current_items = list(st.session_state['viewing_items'][section_key].items())
+                
+                for item_name, score in current_items:
+                    r1, r2, r3 = st.columns([4, 3, 1])
+                    r1.text(item_name)
+                    # 星级评分选择器
+                    new_score = r2.select_slider(
+                        f"Rating for {item_name}",
+                        options=[1, 2, 3, 4, 5],
+                        value=score,
+                        format_func=lambda x: "⭐" * x,
+                        key=f"score_{section_key}_{item_name}",
+                        label_visibility="collapsed"
+                    )
+                    st.session_state['viewing_items'][section_key][item_name] = new_score
+                    
+                    if r3.button("🗑️", key=f"del_{section_key}_{item_name}"):
+                        del st.session_state['viewing_items'][section_key][item_name]
+                        st.rerun()
+                
+                # 添加新项目
+                with st.container():
+                    a1, a2 = st.columns([5, 1])
+                    new_item_name = a1.text_input(f"添加新项目到 {section_key}", key=f"add_input_{section_key}", label_visibility="collapsed", placeholder="输入项目名称...")
+                    if a2.button("➕", key=f"add_btn_{section_key}"):
+                        if new_item_name:
+                            st.session_state['viewing_items'][section_key][new_item_name] = 5
+                            st.rerun()
+                
+                st.session_state['viewing_remarks'][section_key] = st.text_area(f"【{section_key}】额外备注", value=st.session_state['viewing_remarks'][section_key], placeholder="输入该板块的补充说明...", key=f"rem_{section_key}")
 
-        st.markdown("**✅ 亮点（多选）**")
-        pros_opts = ["采光好/朝南", "交通便利（地铁步行 ≤10 分钟）", "设施全新", "装修现代",
-                     "楼层高/视野开阔", "价格合理/性价比高", "管理公司口碑好", "安静低噪", "附近学校/购物方便"]
-        vs_pros = []
-        pc = st.columns(3)
-        for i, opt in enumerate(pros_opts):
-            if pc[i % 3].checkbox(opt, key=f"pro_{i}"):
-                vs_pros.append(opt)
+        st.markdown("---")
+        
+        # 3. 照片管理
+        st.markdown("#### 3️⃣ 现场照片管理")
+        uploaded_photos = st.file_uploader("上传现场照片 (支持多选)", type=['png', 'jpg', 'jpeg'], accept_multiple_files=True)
+        if uploaded_photos:
+            # 将新上传的照片合并（避免重复）
+            for up in uploaded_photos:
+                if up not in st.session_state['viewing_photos']:
+                    st.session_state['viewing_photos'].append(up)
 
-        st.markdown("**⚠️ 注意事项（多选）**")
-        cons_opts = ["不含停车位", "楼层低/噪音", "押金高（>6周）", "无 break clause",
-                     "面积偏小", "装修老旧", "厨卫需更新", "临近工地/施工", "采光一般"]
-        vs_cons = []
-        cc = st.columns(3)
-        for i, opt in enumerate(cons_opts):
-            if cc[i % 3].checkbox(opt, key=f"con_{i}"):
-                vs_cons.append(opt)
+        if st.session_state['viewing_photos']:
+            st.write("📸 已上传照片预览:")
+            pcols = st.columns(4)
+            for i, p in enumerate(st.session_state['viewing_photos']):
+                with pcols[i % 4]:
+                    st.image(p, use_container_width=True)
+                    if st.button("删除", key=f"del_photo_{i}"):
+                        st.session_state['viewing_photos'].pop(i)
+                        st.rerun()
 
-        intention_opts = ["😍 非常感兴趣，马上申请", "😊 较感兴趣，需家人商量", "🤔 一般，再看看其他", "😐 不感兴趣"]
-        vs_intention = st.selectbox("💬 客户意向", intention_opts, key="vs_intent")
-        vs_notes = st.text_area("📝 额外备注（可选）", height=80, key="vs_notes")
+        st.markdown("---")
+        
+        # 4. 总体评价与生成
+        st.markdown("#### 4️⃣ 总体评价 & 导出报告")
+        st.session_state['viewing_remarks']['General'] = st.text_area("✍️ 总体评价 (General Remarks)", value=st.session_state['viewing_remarks']['General'], height=100)
+        
+        st.warning(f"📄 **免责声明将自动包含在报告中**:\n{VIEWING_DISCLAIMER}")
 
-        if st.button("📋 生成带看小结", type="primary", key="vs_gen"):
-            if not vs_client:
-                st.warning("请填写客户姓名")
-            elif not selected_prop:
-                st.warning("请选择看的房源")
+        c_g1, c_g2 = st.columns(2)
+        if c_g1.button("📝 生成带看小结 (文字版)", type="primary", use_container_width=True):
+            if not vs_client or not vs_addr:
+                st.error("请至少填写客户姓名和地址")
             else:
-                summary = gen_viewing_summary(
-                    client_name=vs_client,
-                    prop_title=str(selected_prop.get('title', '')),
-                    prop_price=int(float(str(selected_prop.get('price', 0) or 0))),
-                    prop_rooms=str(selected_prop.get('rooms', '')),
-                    prop_region=str(selected_prop.get('region', '')),
-                    pros=vs_pros,
-                    cons=vs_cons,
-                    intention=vs_intention,
-                    notes=vs_notes
+                summary_text = gen_pro_viewing_summary(
+                    vs_client, str(vs_date), vs_addr, vs_facing,
+                    st.session_state['viewing_items'],
+                    st.session_state['viewing_remarks']
                 )
-                st.session_state['vs_result'] = summary
+                st.session_state['vr_summary_output'] = summary_text
 
-        if 'vs_result' in st.session_state:
-            st.markdown("---")
-            st.markdown("**📄 带看小结（可直接复制发微信）**")
-            st.text_area("", value=st.session_state['vs_result'], height=420, key="vs_output")
-            st.download_button("⬇️ 下载为 TXT", data=st.session_state['vs_result'].encode('utf-8'),
-                               file_name=f"viewing_{vs_client}_{vs_date}.txt",
-                               mime="text/plain", key="vs_dl")
+        if c_g2.button("🎨 生成专业 PDF 报告", use_container_width=True):
+            if not vs_client or not vs_addr:
+                st.error("请至少填写客户姓名和地址")
+            else:
+                with st.spinner("正在排版并生成 PDF..."):
+                    pdf_canvas = create_viewing_report_pdf(
+                        vs_client, str(vs_date), vs_addr, vs_facing,
+                        st.session_state['viewing_items'],
+                        st.session_state['viewing_remarks'],
+                        st.session_state['viewing_photos']
+                    )
+                    st.session_state['vr_pdf_output'] = pdf_canvas
+
+        if 'vr_summary_output' in st.session_state:
+            st.markdown("### 📄 文字版小结")
+            st.text_area("复制发给客户:", value=st.session_state['vr_summary_output'], height=400)
+        
+        if 'vr_pdf_output' in st.session_state:
+            st.markdown("### 🖼️ PDF 报告预览")
+            st.image(st.session_state['vr_pdf_output'], caption="这就是最终生成的 PDF 布局预览", use_container_width=True)
+            
+            # 提供下载
+            buf_pdf = BytesIO()
+            st.session_state['vr_pdf_output'].save(buf_pdf, format="PDF", resolution=100.0)
+            st.download_button(
+                "⬇️ 立即下载 PDF 报告",
+                data=buf_pdf.getvalue(),
+                file_name=f"Viewing_Report_{vs_client}_{vs_date}.pdf",
+                mime="application/pdf"
+            )
 
     # =====================================================================
     # TAB 6 — 📊 房源对比 + 市场简报
