@@ -666,30 +666,177 @@ def get_market_trends(keyword: str = "London Rent"):
         return None
 
 # --- 4h. 合同提取 (AI) ---
-def extract_contract(pdf_file) -> str:
-    if not pdfplumber: return "⚠️ 未安装 pdfplumber 依赖，无法解析 PDF。"
+
+# --- 4h. 合同助手：智能提取与分析 ---
+def parse_ai_json(text: str) -> Dict[str, Any]:
+    """解析 AI 返回的 JSON，处理可能的 Markdown 代码块"""
+    try:
+        clean = re.sub(r"```json\n|\n```|```", "", text).strip()
+        return json.loads(clean)
+    except:
+        return {}
+
+def extract_contract_pro(pdf_file) -> Dict[str, Any]:
+    """深度提取合同关键信息并返回结构化数据"""
+    if not pdfplumber: return {"error": "⚠️ 未安装 pdfplumber 依赖，无法解析 PDF。"}
     try:
         text = ""
         with pdfplumber.open(pdf_file) as pdf:
-            for page in pdf.pages[:5]: # 只读前5页
+            # 增加扫描深度：读取前 15 页以覆盖大多数 AST 合同的所有关键条款
+            for page in pdf.pages[:15]: 
                 text += page.extract_text() or ""
         
         api_key = st.secrets["OPENAI_API_KEY"]
         prompt = (
-            "你是一个专业的英国租房法务助手。请从这段合同文本中提取以下关键信息并用中文输出：\n"
-            "1. 租金金额(PCM) 2. 押金金额 3. 租期起止日期 4. 是否有 Break Clause (几个月) "
-            "5. 维修责任归属 6. 其它潜在风险(如不合理的扣款条款)。\n"
-            "如果没有提到某项，请写'未提及'。"
+            "你是一个专业的英国房屋租赁法务助手。请分析这段 AST 合同文本并提取以下关键信息，以 JSON 格式输出。\n"
+            "JSON 结构要求：\n"
+            "{\n"
+            "  \"Parties\": {\"Landlord\": \"\", \"Tenant\": \"\", \"Address\": \"\"},\n"
+            "  \"Financials\": {\"RentPCM\": \"\", \"Deposit\": \"\", \"DepositScheme\": \"\", \"LatePaymentFee\": \"\"},\n"
+            "  \"Dates\": {\"StartDate\": \"\", \"EndDate\": \"\", \"Term\": \"\", \"BreakClause\": \"\"},\n"
+            "  \"Utilities\": {\"CouncilTax\": \"Paid by?\", \"Water\": \"Paid by?\", \"Electricity\": \"Paid by?\", \"Gas\": \"Paid by?\", \"Broadband\": \"Paid by?\"},\n"
+            "  \"Rules\": {\"Pets\": \"\", \"Smoking\": \"\", \"Subletting\": \"\", \"ProfessionalCleaning\": \"\"},\n"
+            "  \"Maintenance\": {\"TenantObligation\": \"\", \"LandlordObligation\": \"\"},\n"
+            "  \"Risks\": \"列出不合理或高风险的条款（如果没有请写无）\",\n"
+            "  \"Summary\": \"一段话概括合同核心特征\"\n"
+            "}\n"
+            "请务必保证输出是合法的 JSON，语言使用中文。"
         )
         r = requests.post("https://api.deepseek.com/chat/completions",
             json={"model": "deepseek-chat", "messages": [
                 {"role": "system", "content": prompt},
-                {"role": "user", "content": text[:8000]} # 截断防止溢出
+                {"role": "user", "content": text[:12000]} # 加大内容量至 12000 字符
             ]},
-            headers={"Authorization": f"Bearer {api_key}"}, timeout=30)
-        return r.json()['choices'][0]['message']['content'].strip()
+            headers={"Authorization": f"Bearer {api_key}"}, timeout=45) # 增加超时时间
+        
+        raw_res = r.json()['choices'][0]['message']['content'].strip()
+        return parse_ai_json(raw_res)
     except Exception as e:
-        return f"❌ 提取失败: {e}"
+        return {"error": f"❌ 提取失败: {e}"}
+
+def create_contract_analysis_pdf(data: Dict[str, Any]):
+    """将合同分析结果生成为专业 PDF"""
+    # 动态高度预估
+    estimated_height = 2500 
+    canvas = Image.new('RGB', (1200, int(estimated_height)), (255, 255, 255))
+    draw = ImageDraw.Draw(canvas)
+    
+    try:
+        f_header = ImageFont.truetype("simhei.ttf", 45)
+        f_section = ImageFont.truetype("simhei.ttf", 38)
+        f_body = ImageFont.truetype("simhei.ttf", 32)
+        f_label = ImageFont.truetype("simhei.ttf", 32) # 加粗效果可用颜色模拟
+        f_footer = ImageFont.truetype("simhei.ttf", 24)
+        f_banner = ImageFont.truetype("simhei.ttf", 55)
+        f_wm = ImageFont.truetype("simhei.ttf", 150)
+    except:
+        f_header = f_section = f_body = f_label = f_footer = f_banner = f_wm = ImageFont.load_default()
+
+    def draw_row(draw, y, label, val, font_label, font_val, x_label=80, x_val=400):
+        draw.text((x_label, y), f"{label}:", font=font_label, fill=(100, 100, 100))
+        draw.text((x_val, y), str(val), font=font_val, fill=(40, 40, 40))
+        return y + 60
+
+    def draw_wrapped_text(draw, text, x, y, font, max_width, fill=(60, 60, 60)):
+        if not text: return y
+        lines = []
+        current_line = ""
+        for char in str(text):
+            test_line = current_line + char
+            if draw.textlength(test_line, font=font) <= max_width:
+                current_line = test_line
+            else:
+                lines.append(current_line)
+                current_line = char
+        lines.append(current_line)
+        for line in lines:
+            draw.text((x, y), line, font=font, fill=fill)
+            y += font.size + 15
+        return y
+
+    # 1. 页眉 Banner
+    draw.rectangle([(0, 0), (1200, 160)], fill=(26, 26, 26))
+    draw.text((60, 50), "HAO HARBOUR - 合同关键信息智能分析", font=f_banner, fill=(191, 160, 100))
+    
+    y = 220
+    # 2. 基础信息
+    draw.text((60, y), "【 基本信息 & 双方主体 】", font=f_section, fill=(191, 160, 100))
+    y += 80
+    y = draw_row(draw, y, "房东 (Landlord)", data.get('Parties', {}).get('Landlord', ''), f_label, f_body)
+    y = draw_row(draw, y, "租客 (Tenant)", data.get('Parties', {}).get('Tenant', ''), f_label, f_body)
+    y = draw_row(draw, y, "房屋地址", data.get('Parties', {}).get('Address', ''), f_label, f_body)
+    
+    y += 40
+    # 3. 财务条款
+    draw.text((60, y), "【 财务核心条款 】", font=f_section, fill=(191, 160, 100))
+    y += 80
+    y = draw_row(draw, y, "租金 (Rent PCM)", data.get('Financials', {}).get('RentPCM', ''), f_label, f_body)
+    y = draw_row(draw, y, "押金 (Deposit)", data.get('Financials', {}).get('Deposit', ''), f_label, f_body)
+    y = draw_row(draw, y, "押金计划", data.get('Financials', {}).get('DepositScheme', ''), f_label, f_body)
+    y = draw_row(draw, y, "逾期罚款", data.get('Financials', {}).get('LatePaymentFee', ''), f_label, f_body)
+    
+    y += 40
+    # 4. 时间节点 (Dates)
+    draw.text((60, y), "【 关键时间节点 】", font=f_section, fill=(191, 160, 100))
+    y += 80
+    y = draw_row(draw, y, "起租日期", data.get('Dates', {}).get('StartDate', ''), f_label, f_body)
+    y = draw_row(draw, y, "终止日期", data.get('Dates', {}).get('EndDate', ''), f_label, f_body)
+    y = draw_row(draw, y, "租期时长", data.get('Dates', {}).get('Term', ''), f_label, f_body)
+    y = draw_row(draw, y, "解约条款 (Break)", data.get('Dates', {}).get('BreakClause', ''), f_label, f_body)
+    
+    y += 40
+    # 5. 费用承担 (Utilities)
+    draw.text((60, y), "【 杂费/Utilities 承担方 】", font=f_section, fill=(191, 160, 100))
+    y += 80
+    utils = data.get('Utilities', {})
+    y = draw_row(draw, y, "Council Tax", utils.get('CouncilTax', ''), f_label, f_body)
+    y = draw_row(draw, y, "水费 (Water)", utils.get('Water', ''), f_label, f_body)
+    y = draw_row(draw, y, "电费 (Electricity)", utils.get('Electricity', ''), f_label, f_body)
+    y = draw_row(draw, y, "燃气费 (Gas)", utils.get('Gas', ''), f_label, f_body)
+    y = draw_row(draw, y, "宽带 (Broadband)", utils.get('Broadband', ''), f_label, f_body)
+    
+    y += 40
+    # 6. 住户守则
+    draw.text((60, y), "【 住户守则 & 限制 】", font=f_section, fill=(191, 160, 100))
+    y += 80
+    rules = data.get('Rules', {})
+    y = draw_row(draw, y, "宠物政策", rules.get('Pets', ''), f_label, f_body)
+    y = draw_row(draw, y, "禁止吸烟", rules.get('Smoking', ''), f_label, f_body)
+    y = draw_row(draw, y, "转租规定", rules.get('Subletting', ''), f_label, f_body)
+    y = draw_row(draw, y, "专业清洁要求", rules.get('ProfessionalCleaning', ''), f_label, f_body)
+    
+    y += 40
+    # 7. 风险提示 & 总结
+    draw.text((60, y), "【 专家建议与风险提示 】", font=f_section, fill=(220, 20, 60))
+    y += 80
+    draw.text((80, y), "⚠️ 合同潜在风险点:", font=f_label, fill=(220, 20, 60))
+    y += 60
+    y = draw_wrapped_text(draw, data.get('Risks', '无'), 100, y, f_body, 1020, fill=(200, 20, 20))
+    y += 40
+    draw.text((80, y), "📝 核心概括:", font=f_label, fill=(40, 40, 40))
+    y += 60
+    y = draw_wrapped_text(draw, data.get('Summary', '无'), 100, y, f_body, 1020, fill=(60, 60, 60))
+
+    # 8. 水印
+    wm_layer = Image.new('RGBA', canvas.size, (0, 0, 0, 0))
+    wm_draw = ImageDraw.Draw(wm_layer)
+    wm_color = (180, 180, 180, 75)
+    for i in range(0, canvas.size[1], 1000):
+        wm_draw.text((150, i + 400), "Hao Harbour Analysis", font=f_wm, fill=wm_color)
+    rotated_wm = wm_layer.rotate(30, expand=False)
+    canvas.paste(rotated_wm, (0, 0), rotated_wm)
+
+    # 9. 页脚
+    footer_height = 200
+    total_y = y + 100 + footer_height
+    final_canvas = canvas.crop((0, 0, 1200, int(total_y)))
+    f_draw = ImageDraw.Draw(final_canvas)
+    f_y = total_y - footer_height
+    f_draw.rectangle([(0, f_y), (1200, total_y)], fill=(245, 245, 245))
+    f_draw.text((60, f_y + 40), f"WeChat: {VIEWING_CONTACT_WECHAT} | Contact: {VIEWING_CONTACT_PHONE}", font=f_body, fill=(100, 100, 100))
+    f_draw.text((60, f_y + 100), "此分析仅由 AI 生成，旨在协助阅读并不能替代专业法律建议。请务必自行复核原文。", font=f_footer, fill=(150, 150, 150))
+
+    return final_canvas
 
 
 # --- 初始化带看报告状态 ---
@@ -1221,13 +1368,53 @@ if ws:
             contract_file = st.file_uploader("点击上传 PDF 合同", type="pdf")
             if st.button("🧠 开始分析合同", type="primary"):
                 if contract_file:
-                    with st.spinner("AI 正在深度阅读合同..."):
-                        res = extract_contract(contract_file)
-                        st.markdown("---")
-                        st.markdown("**🛡️ 合同摘要与风险提示**")
-                        st.write(res)
+                    with st.spinner("AI 正在深度阅读合同(约30-45秒)..."):
+                        res = extract_contract_pro(contract_file)
+                        if "error" in res:
+                            st.error(res["error"])
+                        else:
+                            st.session_state['contract_data'] = res
                 else:
                     st.warning("请先上传文件")
+
+            if 'contract_data' in st.session_state:
+                res = st.session_state['contract_data']
+                st.markdown("---")
+                st.markdown("**🛡️ 合同核心摘要与风险评估**")
+                
+                # 核心财务指标
+                m1, m2 = st.columns(2)
+                fin = res.get('Financials', {})
+                m1.metric("月租 (Rent PCM)", fin.get('RentPCM', '未知'))
+                m2.metric("押金 (Deposit)", fin.get('Deposit', '未知'))
+                
+                with st.expander("🔍 详细条款穿透 (Detailed Analysis)", expanded=True):
+                    st.write(f"🏠 **地址**: {res.get('Parties', {}).get('Address', '未知')}")
+                    st.write(f"📅 **租期**: {res.get('Dates', {}).get('Term', '未知')} ({res.get('Dates', {}).get('StartDate', '')} 至 {res.get('Dates', {}).get('EndDate', '')})")
+                    st.write(f"🚪 **Break Clause**: {res.get('Dates', {}).get('BreakClause', '未见')}")
+                    
+                    st.markdown("**💰 杂费承担 (Utilities)**")
+                    ut = res.get('Utilities', {})
+                    if ut:
+                        cols = st.columns(len(ut))
+                        for i, (k, v) in enumerate(ut.items()):
+                            cols[i].caption(k)
+                            cols[i].write(v)
+
+                    st.markdown("**🛡️ 风险提示 (Risks)**")
+                    st.error(res.get('Risks', '未发现显著风险'))
+                    
+                    st.markdown("**📋 专家总结**")
+                    st.info(res.get('Summary', '无'))
+                
+                if st.button("🎨 导出分析报告 PDF", key="contract_pdf_gen", use_container_width=True):
+                    with st.spinner("正在排版并生成 PDF..."):
+                        p_img = create_contract_analysis_pdf(res)
+                        buf_ca = BytesIO()
+                        p_img.save(buf_ca, format="PDF", resolution=100.0)
+                        st.download_button("⬇️ 立即下载分析 PDF", data=buf_ca.getvalue(), 
+                                           file_name=f"Contract_Report_{datetime.now().strftime('%Y%m%d')}.pdf", 
+                                           mime="application/pdf", key="dl_ca_pdf")
 
         with tc2:
             st.markdown("#### 📱 小红书爆款优化器")
