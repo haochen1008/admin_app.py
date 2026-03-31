@@ -76,6 +76,65 @@ def get_ws():
         st.error(f"数据库连接失败: {e}")
         return None
 
+
+
+
+
+def get_safe_records(ws):
+    """
+    Robust version of get_all_records() that avoids GSpreadException
+    by filtering out empty headers and handling duplicates.
+    """
+    try:
+        raw_rows = ws.get_all_values()
+        if not raw_rows: return []
+        headers = raw_rows[0]
+        data_rows = raw_rows[1:]
+        clean_headers = []
+        seen = {}
+        for i, h in enumerate(headers):
+            h = str(h).strip()
+            if not h: h = f"Unnamed_{i}"
+            if h in seen:
+                seen[h] += 1
+                clean_headers.append(f"{h}_{seen[h]}")
+            else:
+                seen[h] = 0
+                clean_headers.append(h)
+        records = []
+        for row in data_rows:
+            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
+            records.append(dict(zip(clean_headers, row)))
+        return records
+    except Exception as e:
+        import streamlit as st
+        st.error(f"⚠️ Read Error: {e}")
+        return []
+
+headers = raw_rows[0]
+        data_rows = raw_rows[1:]
+        clean_headers = []
+        seen = {}
+        for i, h in enumerate(headers):
+            h = str(h).strip()
+            if not h: h = f"Unnamed_{i}"
+            if h in seen:
+                seen[h] += 1
+                clean_headers.append(f"{h}_{seen[h]}")
+            else:
+                seen[h] = 0
+                clean_headers.append(h)
+        records = []
+        for row in data_rows:
+            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
+            records.append(dict(zip(clean_headers, row)))
+        return records
+    except Exception as e:
+        import streamlit as st
+        st.error(f"⚠️ Read Error: {e}")
+        return []
+
+
 # --- 3. 智能伦敦分区 ---
 # 基于英国邮编前缀（outward code）精准定位伦敦五大区
 # 数据来源：英国皇家邮政 + Google Maps 地理验证
@@ -198,7 +257,32 @@ def scrape_rightmove(url):
     }
     try:
         if not url or "rightmove.co.uk" not in url:
-            return None, "无效的 Rightmove 链接"
+            return None
+
+
+headers = raw_rows[0]
+        data_rows = raw_rows[1:]
+        clean_headers = []
+        seen = {}
+        for i, h in enumerate(headers):
+            h = str(h).strip()
+            if not h: h = f"Unnamed_{i}"
+            if h in seen:
+                seen[h] += 1
+                clean_headers.append(f"{h}_{seen[h]}")
+            else:
+                seen[h] = 0
+                clean_headers.append(h)
+        records = []
+        for row in data_rows:
+            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
+            records.append(dict(zip(clean_headers, row)))
+        return records
+    except Exception as e:
+        import streamlit as st
+        st.error(f"⚠️ Read Error: {e}")
+        return []
+, "无效的 Rightmove 链接"
         res = requests.get(url, headers=headers, timeout=15)
         res.raise_for_status()
         html = res.text
@@ -208,7 +292,32 @@ def scrape_rightmove(url):
                 data, _ = json.JSONDecoder().raw_decode(page_model_raw)
                 p_data = data.get('propertyData', {})
             except json.JSONDecodeError as e:
-                return None, f"JSON解析失败: {e}"
+                return None
+
+
+headers = raw_rows[0]
+        data_rows = raw_rows[1:]
+        clean_headers = []
+        seen = {}
+        for i, h in enumerate(headers):
+            h = str(h).strip()
+            if not h: h = f"Unnamed_{i}"
+            if h in seen:
+                seen[h] += 1
+                clean_headers.append(f"{h}_{seen[h]}")
+            else:
+                seen[h] = 0
+                clean_headers.append(h)
+        records = []
+        for row in data_rows:
+            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
+            records.append(dict(zip(clean_headers, row)))
+        return records
+    except Exception as e:
+        import streamlit as st
+        st.error(f"⚠️ Read Error: {e}")
+        return []
+, f"JSON解析失败: {e}"
             
             if p_data:
                 raw_title = p_data.get('text', {}).get('pageTitle', '')
@@ -288,9 +397,59 @@ def scrape_rightmove(url):
                     'lat': lat,
                     'lng': lng
                 }, None
-        return None, "无法解析数据，请检查链接是否为房源页"
+        return None
+
+
+headers = raw_rows[0]
+        data_rows = raw_rows[1:]
+        clean_headers = []
+        seen = {}
+        for i, h in enumerate(headers):
+            h = str(h).strip()
+            if not h: h = f"Unnamed_{i}"
+            if h in seen:
+                seen[h] += 1
+                clean_headers.append(f"{h}_{seen[h]}")
+            else:
+                seen[h] = 0
+                clean_headers.append(h)
+        records = []
+        for row in data_rows:
+            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
+            records.append(dict(zip(clean_headers, row)))
+        return records
     except Exception as e:
-        return None, f"抓取失败: {e}"
+        import streamlit as st
+        st.error(f"⚠️ Read Error: {e}")
+        return []
+, "无法解析数据，请检查链接是否为房源页"
+    except Exception as e:
+        return None
+
+
+headers = raw_rows[0]
+        data_rows = raw_rows[1:]
+        clean_headers = []
+        seen = {}
+        for i, h in enumerate(headers):
+            h = str(h).strip()
+            if not h: h = f"Unnamed_{i}"
+            if h in seen:
+                seen[h] += 1
+                clean_headers.append(f"{h}_{seen[h]}")
+            else:
+                seen[h] = 0
+                clean_headers.append(h)
+        records = []
+        for row in data_rows:
+            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
+            records.append(dict(zip(clean_headers, row)))
+        return records
+    except Exception as e:
+        import streamlit as st
+        st.error(f"⚠️ Read Error: {e}")
+        return []
+, f"抓取失败: {e}"
 
 # --- 4. 核心：海报引擎 (仅修改 display_text 拼接) ---
 def create_poster(files, title, price, rooms, region="伦敦"):
@@ -352,6 +511,31 @@ def create_poster(files, title, price, rooms, region="伦敦"):
     except Exception as e:
         st.error(f"海报生成出错: {e}")
         return None
+
+
+headers = raw_rows[0]
+        data_rows = raw_rows[1:]
+        clean_headers = []
+        seen = {}
+        for i, h in enumerate(headers):
+            h = str(h).strip()
+            if not h: h = f"Unnamed_{i}"
+            if h in seen:
+                seen[h] += 1
+                clean_headers.append(f"{h}_{seen[h]}")
+            else:
+                seen[h] = 0
+                clean_headers.append(h)
+        records = []
+        for row in data_rows:
+            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
+            records.append(dict(zip(clean_headers, row)))
+        return records
+    except Exception as e:
+        import streamlit as st
+        st.error(f"⚠️ Read Error: {e}")
+        return []
+
 # --- 4b. 微信方版海报 1080x1080 ---
 def create_wechat_poster(files, title, price, rooms, region="伦敦"):
     try:
@@ -390,6 +574,31 @@ def create_wechat_poster(files, title, price, rooms, region="伦敦"):
     except Exception as e:
         st.error(f"微信海报生成出错: {e}")
         return None
+
+
+headers = raw_rows[0]
+        data_rows = raw_rows[1:]
+        clean_headers = []
+        seen = {}
+        for i, h in enumerate(headers):
+            h = str(h).strip()
+            if not h: h = f"Unnamed_{i}"
+            if h in seen:
+                seen[h] += 1
+                clean_headers.append(f"{h}_{seen[h]}")
+            else:
+                seen[h] = 0
+                clean_headers.append(h)
+        records = []
+        for row in data_rows:
+            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
+            records.append(dict(zip(clean_headers, row)))
+        return records
+    except Exception as e:
+        import streamlit as st
+        st.error(f"⚠️ Read Error: {e}")
+        return []
+
 
 # --- 4c. 抖音/Story 竖版海报 1080x1920 ---
 def create_story_poster(files, title, price, rooms, region="伦敦"):
@@ -434,6 +643,31 @@ def create_story_poster(files, title, price, rooms, region="伦敦"):
     except Exception as e:
         st.error(f"抖音海报生成出错: {e}")
         return None
+
+
+headers = raw_rows[0]
+        data_rows = raw_rows[1:]
+        clean_headers = []
+        seen = {}
+        for i, h in enumerate(headers):
+            h = str(h).strip()
+            if not h: h = f"Unnamed_{i}"
+            if h in seen:
+                seen[h] += 1
+                clean_headers.append(f"{h}_{seen[h]}")
+            else:
+                seen[h] = 0
+                clean_headers.append(h)
+        records = []
+        for row in data_rows:
+            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
+            records.append(dict(zip(clean_headers, row)))
+        return records
+    except Exception as e:
+        import streamlit as st
+        st.error(f"⚠️ Read Error: {e}")
+        return []
+
 
 # --- 4d. 抖音口播脚本生成 ---
 def gen_douyin_script(title: str, price: int, rooms: str, region: str, desc: str) -> str:
@@ -657,6 +891,31 @@ def gen_comparison_image(selected_props: List[Dict]) -> Image.Image:
 # --- 4g. 市场热度研究 (Trends) ---
 def get_market_trends(keyword: str = "London Rent"):
     if not TrendReq: return None
+
+
+headers = raw_rows[0]
+        data_rows = raw_rows[1:]
+        clean_headers = []
+        seen = {}
+        for i, h in enumerate(headers):
+            h = str(h).strip()
+            if not h: h = f"Unnamed_{i}"
+            if h in seen:
+                seen[h] += 1
+                clean_headers.append(f"{h}_{seen[h]}")
+            else:
+                seen[h] = 0
+                clean_headers.append(h)
+        records = []
+        for row in data_rows:
+            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
+            records.append(dict(zip(clean_headers, row)))
+        return records
+    except Exception as e:
+        import streamlit as st
+        st.error(f"⚠️ Read Error: {e}")
+        return []
+
     try:
         pytrends = TrendReq(hl='en-US', tz=360)
         pytrends.build_payload([keyword], cat=0, timeframe='today 3-m', geo='GB-LND')
@@ -664,6 +923,31 @@ def get_market_trends(keyword: str = "London Rent"):
         return df
     except:
         return None
+
+
+headers = raw_rows[0]
+        data_rows = raw_rows[1:]
+        clean_headers = []
+        seen = {}
+        for i, h in enumerate(headers):
+            h = str(h).strip()
+            if not h: h = f"Unnamed_{i}"
+            if h in seen:
+                seen[h] += 1
+                clean_headers.append(f"{h}_{seen[h]}")
+            else:
+                seen[h] = 0
+                clean_headers.append(h)
+        records = []
+        for row in data_rows:
+            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
+            records.append(dict(zip(clean_headers, row)))
+        return records
+    except Exception as e:
+        import streamlit as st
+        st.error(f"⚠️ Read Error: {e}")
+        return []
+
 
 # --- 4h. 合同提取 (AI) ---
 
@@ -696,207 +980,265 @@ def extract_contract_pro(pdf_file, target_lang="中文") -> Dict[str, Any]:
             f"要求：\n"
             f"1. 务必提取基础元数据：房东、租客、房屋地址、月租(Rent PCM)、押金(Deposit)、起租日期(Starting Date/Commencement Date)、终止日期、租期时长、解约条款(Break Clause)。\n"
             f"2. 除了元数据，请识别合同中的每个大模块（如 Tenant's Obligation, Landlord's Covenants, End of Tenancy, Special Clauses 等）。\n"
-            f"3. 对每个模块进行深度的要点总结，不要遗漏任何关于维修、杂费(Bills)支付、转租、宠物、退房清洁等细节。\n\n"
-            f"{lang_instruction}\n\n"
-            "JSON 结构要求：\n"
-            "{\n"
-            "  \"Metadata\": {\"Landlord\": \"\", \"Tenant\": \"\", \"Address\": \"\", \"RentPCM\": \"\", \"Deposit\": \"\", \"StartDate\": \"\", \"EndDate\": \"\", \"Term\": \"\", \"BreakClause\": \"\"},\n"
-            "  \"Sections\": [\n"
-            "    {\"Heading\": \"模块标题\", \"Content\": \"该部分的深度总结...\"},\n"
-            "    {\"Heading\": \"模块标题\", \"Content\": \"内容...\"}\n"
-            "  ],\n"
-            "  \"Risks\": \"列出风险点\",\n"
-            "  \"Summary\": \"总结\"\n"
-            "}\n"
-        )
-        r = requests.post("https://api.deepseek.com/chat/completions",
-            json={"model": "deepseek-chat", "messages": [
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": text[:30000]} # 增加至 30,000 字符覆盖全合同
-            ]},
-            headers={"Authorization": f"Bearer {api_key}"}, timeout=90)
-        
-        raw_res = r.json()['choices'][0]['message']['content'].strip()
-        return parse_ai_json(raw_res)
-    except Exception as e:
-        return {"error": f"❌ 提取失败: {e}"}
-
-import re
-import json
-import requests
-from typing import Dict, Any
-from PIL import Image, ImageDraw, ImageFont
-
-import re
-from typing import Dict, Any
-from PIL import Image, ImageDraw, ImageFont
-
-import re
-from typing import Dict, Any
-from PIL import Image, ImageDraw, ImageFont
-
-import re
-from typing import Dict, Any
-from PIL import Image, ImageDraw, ImageFont
-
-def create_contract_analysis_pdf(data: Dict[str, Any], lang="中文"):
-    """
-    电脑版 PDF 终极版：通过物理安全区缩进和强制字符折行，彻底杜绝右侧内容丢失。
-    """
-    def sanitize_text(t):
-        if not t or not isinstance(t, str): return ""
-        t = t.replace("£", "GBP").replace("ø", "o").replace("–", "-").replace("—", "-")
-        return "".join(c for c in t if ord(c) <= 0xFFFF)
-
-    # --- 布局核心控制 (针对 2000px 宽度) ---
-    CANVAS_W = 2000          
-    LEFT_MARGIN = 140        
-    # 将右边界物理限制在 1700，绝对确保右侧 300 像素为空白区，防止任何溢出
-    RIGHT_LIMIT = 1700       
-    MAX_TEXT_W = RIGHT_LIMIT - LEFT_MARGIN 
+            f"3. 对每个模块进行深度的�    for s in data.get('Sections', []):
+        sections.append({
+            "Heading": sanitize_text(s.get('Heading', '')),
+            "Content": sanitize_text(s.get('Content', ''))
+        })
     
-    LABEL_COL_W = 400        
-    META_VAL_X = LEFT_MARGIN + LABEL_COL_W 
-    META_VAL_MAX_W = RIGHT_LIMIT - META_VAL_X 
+    risks_txt = sanitize_text(data.get('Risks', ''))
+    summary_txt = sanitize_text(data.get('Summary', ''))
     
-    LINE_SPACING = 32        
-    BULLET_INDENT = 60       
-    # ---------------------------------------
-
-    LABEL_MAP = {
-        "中文": {
-            "Title": "HAO HARBOUR - 合同深度智慧分析报告",
-            "MetaTitle": "【 基本财务 & 关键条文概览 】",
-            "RiskTitle": "【 综合风险观察 】",
-            "RiskDefault": "无显著高危条款",
-            "Disclaimer": "本报告由 Hao Harbour AI 自动生成，旨在协助阅读。不承担法律担保责任，请务必以合同原件为准。"
-        }
-    }
-    L = LABEL_MAP["中文"]
-
-    try:
-        f_banner = ImageFont.truetype("simhei.ttf", 60) 
-        f_section = ImageFont.truetype("simhei.ttf", 46)
-        f_label = ImageFont.truetype("simhei.ttf", 34)
-        f_body = ImageFont.truetype("simhei.ttf", 34)
-        f_footer = ImageFont.truetype("simhei.ttf", 26)
-        f_wm = ImageFont.truetype("simhei.ttf", 160)
-    except:
-        f_banner = f_section = f_label = f_body = f_footer = f_wm = ImageFont.load_default()
-
-    _dummy_draw = ImageDraw.Draw(Image.new('RGB', (1, 1)))
-
-    # --- 增强型换行算法：支持字符级强行折断 ---
-    def get_lines_absolute(text, font, available_width):
-        text = sanitize_text(text)
-        if not text: return []
-        
-        paragraphs = text.split('\n')
-        all_lines = []
-        
-        for p in paragraphs:
-            current_line = ""
-            for char in p:
-                test_line = current_line + char
-                # 增加 10% 的计算冗余，确保物理安全
-                if _dummy_draw.textlength(test_line, font=font) * 1.05 <= available_width:
-                    current_line = test_line
-                else:
-                    if current_line: all_lines.append(current_line)
-                    current_line = char
-            if current_line: all_lines.append(current_line)
-        return all_lines
-
-    def draw_smart_points(draw, text, x, y, font, max_w, fill=(50, 50, 50)):
-        # 拆分 points (序号/换行)
-        points = re.split(r'\d+[\.\)．]\s*|\n|(?<=[a-z]\.)\s+', text)
-        points = [p.strip() for p in points if len(p.strip()) > 3]
-        
-        for p in points:
-            # 绘制金色列表点
-            draw.text((x, y), "●", font=font, fill=(191, 160, 100))
-            inner_w = max_w - BULLET_INDENT
-            lines = get_lines_absolute(p, font, inner_w)
-            for line in lines:
-                draw.text((x + BULLET_INDENT, y), line, font=font, fill=fill)
-                y += font.size + LINE_SPACING
-            y += 25 
+    # 动态高度计算重构
+    y_ptr = 450 
+    # Metadata: 预估高度 (3个 Full Row + 3个 Grid Row)
+    y_ptr += 3 * 120 # Metadata Full Rows
+    y_ptr += 3 * 100 # Metadata Grid Rows
+    
+    for s in sections:
+        y_ptr += 120 # Padding/Header
+        lines = get_lines(s["Content"], f_body, 1020)
+        y_ptr += len(lines) * 45 + 80
+    
+    y_ptr += 250 + len(get_lines(risks_txt, f_body, 1020)) * 45
+    y_ptr += 150 + len(get_lines(summary_txt, f_body, 1020)) * 45
+    
+    total_est_height = y_ptr + 800
+    
+    canvas = Image.new('RGB', (1200, int(total_est_height)), (255, 255, 255))
+    draw = ImageDraw.Draw(canvas)
+    
+    def draw_wrapped_text(draw, text, x, y, font, max_width, fill=(60, 60, 60), line_h=1.5):
+        lines = get_lines(text, font, max_width)
+        for line in lines:
+            draw.text((x, y), line, font=font, fill=fill)
+            y += int(font.size * line_h)
         return y
 
-    # --- 渲染流程 ---
-    canvas = Image.new('RGB', (CANVAS_W, 12000), (255, 255, 255))
-    draw = ImageDraw.Draw(canvas)
+    def draw_meta_row_full(draw, y, label, val, font_label, font_val):
+        draw.text((80, y), f"{label}:", font=font_label, fill=(130, 130, 130))
+        y += 40
+        # 值加粗/深色，并从缩进处开始
+        new_y = draw_wrapped_text(draw, val, 100, y, font_val, 1020, fill=(30, 30, 30), line_h=1.4)
+        return max(y + 60, new_y + 30)
 
-    # 1. 页眉
-    draw.rectangle([(0, 0), (CANVAS_W, 220)], fill=(30, 30, 30))
-    draw.text((LEFT_MARGIN, 80), L["Title"], font=f_banner, fill=(210, 180, 120))
+    def draw_meta_grid(draw, y, l1, v1, l2, v2, font_label, font_val):
+        # 左列: 限制宽度防止溢出到右列
+        draw.text((80, y), f"{l1}:", font=font_label, fill=(130, 130, 130))
+        draw_wrapped_text(draw, str(v1), 80, y + 35, font_val, 480, fill=(30, 30, 30), line_h=1.3)
+        # 右列
+        draw.text((600, y), f"{l2}:", font=font_label, fill=(130, 130, 130))
+        draw_wrapped_text(draw, str(v2), 600, y + 35, font_val, 520, fill=(30, 30, 30), line_h=1.3)
+        return y + 115
+
+    # 1. 页眉 Banner (高级深灰)
+    draw.rectangle([(0, 0), (1200, 180)], fill=(35, 35, 35))
     
-    y = 320
-    # 2. Metadata (基本财务)
-    draw.text((LEFT_MARGIN, y), L["MetaTitle"], font=f_section, fill=(210, 180, 120))
-    y += 110
+    # 动态居中/安全渲染标题
+    report_title = L["Title"]
+    title_w = _dummy_draw.textlength(report_title, font=f_banner)
+    if title_w > 1080: # 如果太长，尝试缩小字号或强制居中
+        # 简单修正：字号已根据长度缩放，这里额外确保居中且不溢出
+        draw_wrapped_text(draw, report_title, 60, 50, f_banner, 1080, fill=(191, 160, 100), line_h=1.2)
+    else:
+        # 居中渲染
+        title_x = (1200 - title_w) // 2
+        draw.text((title_x, 55), report_title, font=f_banner, fill=(191, 160, 100))
     
-    meta_fields = [
-        ("Landlord", "Landlord"), ("Tenant", "Tenant"), ("Address", "Address"),
-        ("RentPCM", "Rent (PCM)"), ("Deposit", "Deposit"), ("StartDate", "Start Date"),
-        ("EndDate", "End Date"), ("Term", "Term"), ("BreakClause", "Break Clause")
-    ]
+    y = 240
+    # 2. 基础财务 & 关键日期 (精品网格布局)
+    draw.text((60, y), L["MetaTitle"], font=f_section, fill=(191, 160, 100))
+    y += 100
+    # 房东、租客、地址 通常较长，始终占全行
+    y = draw_meta_row_full(draw, y, L["Landlord"], meta.get('Landlord', 'N/A'), f_label, f_body)
+    y = draw_meta_row_full(draw, y, L["Tenant"], meta.get('Tenant', 'N/A'), f_label, f_body)
+    y = draw_meta_row_full(draw, y, L["Address"], meta.get('Address', 'N/A'), f_label, f_body)
     
-    for key, label in meta_fields:
-        val = str(data.get('Metadata', {}).get(key, 'N/A'))
-        draw.text((LEFT_MARGIN, y), f"{label}:", font=f_label, fill=(130, 130, 130))
+    # 金额与日期 较短，可以使用网格
+    y = draw_meta_grid(draw, y, L["Rent"], meta.get('RentPCM', 'N/A'), L["Deposit"], meta.get('Deposit', 'N/A'), f_label, f_body)
+    y = draw_meta_grid(draw, y, L["StartDate"], meta.get('StartDate', 'N/A'), L["EndDate"], meta.get('EndDate', 'N/A'), f_label, f_body)
+    # Term 和 Break Clause 尤其后者可能很长，虽然放网格但需小心 (这里强制 BreakClause 为 Full Row)
+    y = draw_meta_grid(draw, y, L["Term"], meta.get('Term', 'N/A'), "...", "...", f_label, f_body)
+    y = draw_meta_row_full(draw, y, L["Break"], meta.get('BreakClause', 'N/A'), f_label, f_body)
+    
+    y += 80
+    # 3. 逐章节核心分析 (Premium Card Layout)
+    for s in sections:
+        header = s.get('Heading', 'Summary')
+        content = s.get('Content', '')
+        if not content: continue
         
-        # 使用绝对换行逻辑
-        m_lines = get_lines_absolute(val, f_body, META_VAL_MAX_W)
-        for ml in m_lines:
-            draw.text((META_VAL_X, y), ml, font=f_body, fill=(40, 40, 40))
-            y += f_body.size + 15
-        y += 45
+        # 预估卡片高度
+        sec_lines = get_lines(content, f_body, 1000)
+        card_h = 130 + len(sec_lines) * 44
+        
+        # 绘制阴影效果/背景
+        draw.rectangle([(65, y+5), (1135, y + card_h + 5)], fill=(240, 240, 240)) # 阴影
+        draw.rectangle([(60, y), (1130, y + card_h)], fill=(255, 255, 255), outline=(225, 225, 225))
+        draw.rectangle([(60, y), (75, y + card_h)], fill=(191, 160, 100)) # 左侧品牌色装饰
+        
+        draw.text((100, y + 35), f"▶ {header}", font=f_section, fill=(191, 160, 100))
+        y += 110
+        y = draw_wrapped_text(draw, content, 100, y, f_body, 1000, fill=(60, 60, 60), line_h=1.6)
+        y += 100 # Section spacing
+t.truetype("simhei.ttf", 28)
+        f_footer = ImageFont.truetype("simhei.ttf", 20)
+        f_banner = ImageFont.truetype("simhei.ttf", banner_size)
+        f_wm = ImageFont.truetype("simhei.ttf", 150)
+    except:
+        f_header = f_section = f_body = f_label = f_footer = f_banner = f_wm = ImageFont.load_default()
+
+    def sanitize_text(t):
+        if not t or not isinstance(t, str): return ""
+        # 替换常见特殊符号，SimHei 有时无法处理
+        t = t.replace("£", "GBP").replace("ø", "o").replace("–", "-").replace("—", "-")
+        # 过滤掉无法渲染的 Emoji 或非 BMP 字符 (包括 0xFFFF 及以上)
+        return "".join(c for c in t if ord(c) < 0xFFFF)
+
+    # 创建一个全局用于测量的 dummy image
+    _dummy_img = Image.new('RGB', (1, 1))
+    _dummy_draw = ImageDraw.Draw(_dummy_img)
+
+    def get_lines(text, font, max_width):
+        text = sanitize_text(text)
+        if not text: return []
+        lines = []
+        current_line = ""
+        for char in str(text):
+            test_line = current_line + char
+            try:
+                # 使用全局测量对象，避免重复创建 Image
+                w = _dummy_draw.textlength(test_line, font=font)
+                if w <= max_width:
+                    current_line = test_line
+                else:
+                    lines.append(current_line)
+                    current_line = char
+            except:
+                lines.append(current_line)
+                current_line = char
+        lines.append(current_line)
+        return lines
+
+    # 第一步：清洗并计算高度
+    meta = {k: sanitize_text(v) for k, v in data.get('Metadata', {}).items()}
+    sections = []
+    for s in data.get('Sections', []):
+        sections.append({
+            "Heading": sanitize_text(s.get('Heading', '')),
+            "Content": sanitize_text(s.get('Content', ''))
+        })
+    
+    risks_txt = sanitize_text(data.get('Risks', ''))
+    summary_txt = sanitize_text(data.get('Summary', ''))
+    
+    y_ptr = 400 
+    y_ptr += 3 * 100 # Metadata Rows
+    y_ptr += 3 * 85  # Metadata Grid
+    
+    for s in sections:
+        y_ptr += 140
+        lines = get_lines(s["Content"], f_body, 1000)
+        y_ptr += len(lines) * 50 + 60
+    
+    y_ptr += 250 + len(get_lines(risks_txt, f_body, 1000)) * 50
+    y_ptr += 150 + len(get_lines(summary_txt, f_body, 1000)) * 50
+    
+    total_est_height = y_ptr + 800
+    
+    canvas = Image.new('RGB', (1200, int(total_est_height)), (255, 255, 255))
+    draw = ImageDraw.Draw(canvas)
+    
+    def draw_wrapped_text(draw, text, x, y, font, max_width, fill=(60, 60, 60), line_h=1.6):
+        lines = get_lines(text, font, max_width)
+        for line in lines:
+            draw.text((x, y), line, font=font, fill=fill)
+            y += int(font.size * line_h)
+        return y
+
+    def draw_meta_row_full(draw, y, label, val, font_label, font_val):
+        draw.text((80, y), f"{label}:", font=font_label, fill=(100, 100, 100))
+        new_y = draw_wrapped_text(draw, val, 400, y, font_val, 720, fill=(40, 40, 40), line_h=1.4)
+        return max(y + 80, new_y + 20)
+
+    def draw_meta_grid(draw, y, l1, v1, l2, v2, font_label, font_val):
+        # 左列
+        draw.text((80, y), f"{l1}:", font=font_label, fill=(100, 100, 100))
+        draw.text((320, y), str(v1), font=font_val, fill=(40, 40, 40))
+        # 右列
+        draw.text((600, y), f"{l2}:", font=font_label, fill=(100, 100, 100))
+        draw.text((840, y), str(v2), font=font_val, fill=(40, 40, 40))
+        return y + 80
+
+    # 1. 页眉 Banner
+    draw.rectangle([(0, 0), (1200, 160)], fill=(26, 26, 26))
+    draw.text((60, 50), L["Title"], font=f_banner, fill=(191, 160, 100))
+    
+    y = 220
+    # 2. 基础财务 & 关键日期 (精品网格布局)
+    draw.text((60, y), L["MetaTitle"], font=f_section, fill=(191, 160, 100))
+    y += 95
+    # 宽项
+    y = draw_meta_row_full(draw, y, L["Landlord"], meta.get('Landlord', ''), f_label, f_body)
+    y = draw_meta_row_full(draw, y, L["Tenant"], meta.get('Tenant', ''), f_label, f_body)
+    y = draw_meta_row_full(draw, y, L["Address"], meta.get('Address', ''), f_label, f_body)
+    # 网格项 (2x2)
+    y = draw_meta_grid(draw, y, L["Rent"], meta.get('RentPCM', ''), L["Deposit"], meta.get('Deposit', ''), f_label, f_body)
+    y = draw_meta_grid(draw, y, L["StartDate"], meta.get('StartDate', ''), L["EndDate"], meta.get('EndDate', ''), f_label, f_body)
+    y = draw_meta_grid(draw, y, L["Term"], meta.get('Term', ''), "Break Clause", meta.get('BreakClause', ''), f_label, f_body)
+    
+    y += 70
+    # 3. 逐章节核心分析 (Card-based Layout)
+    for s in sections:
+        # 绘制背景卡片 (浅灰色圆角矩形效果)
+        header = s.get('Heading', 'Summary')
+        # 预估高度用于绘制背景
+        sec_lines = get_lines(s["Content"], f_body, 1000)
+        card_h = 110 + len(sec_lines) * 45
+        draw.rectangle([(70, y), (1130, y + card_h)], fill=(250, 250, 250), outline=(230, 230, 230))
+        draw.rectangle([(70, y), (85, y + card_h)], fill=(191, 160, 100)) # 左侧装饰条
+        
+        draw.text((110, y + 30), f"📍 {header}", font=f_section, fill=(191, 160, 100))
+        y += 100
+        y = draw_wrapped_text(draw, s.get('Content', ''), 110, y, f_body, 980, line_h=1.6)
+        y += 80 # Section spacing
 
     y += 40
-    # 3. 详细 Sections (核心条款)
-    for s in data.get('Sections', []):
-        heading = sanitize_text(s.get('Heading', 'Summary'))
-        draw.rectangle([(LEFT_MARGIN, y), (LEFT_MARGIN + 15, y + 55)], fill=(191, 160, 100))
-        draw.text((LEFT_MARGIN + 45, y), heading, font=f_section, fill=(50, 50, 50))
-        y += 100
-        y = draw_smart_points(draw, s.get('Content', ''), LEFT_MARGIN + 45, y, f_body, MAX_TEXT_W - 45)
-        y += 80
+    # 4. 风险建议
+    draw.text((60, y), L["RiskTitle"], font=f_section, fill=(220, 20, 60))
+    y += 85
+    y = draw_wrapped_text(draw, risks_txt if risks_txt else L["RiskDefault"], 110, y, f_body, 980, fill=(200, 20, 20), line_h=1.6)
+    
+    y += 40
+    # 5. 总体结论 (Summary Section)
+    if summary_txt:
+        draw.text((60, y), L["SummaryTitle"], font=f_section, fill=(50, 50, 50))
+        y += 85
+        y = draw_wrapped_text(draw, summary_txt, 110, y, f_body, 980, line_h=1.6)
+        y += 60
 
-    # 4. 综合风险
-    draw.rectangle([(LEFT_MARGIN, y), (RIGHT_LIMIT, y + 6)], fill=(220, 50, 50))
-    y += 60
-    draw.text((LEFT_MARGIN, y), L["RiskTitle"], font=f_section, fill=(220, 50, 50))
-    y += 110
-    risks = data.get('Risks', L["RiskDefault"])
-    y = draw_smart_points(draw, risks, LEFT_MARGIN + 45, y, f_body, MAX_TEXT_W - 45, fill=(180, 0, 0))
-
-    # 5. 水印 (铺设范围限制在 RIGHT_LIMIT 以内)
+    # 6. 水印
     wm_layer = Image.new('RGBA', canvas.size, (0, 0, 0, 0))
     wm_draw = ImageDraw.Draw(wm_layer)
-    for row in range(0, y + 1000, 1200):
-        for col in range(0, RIGHT_LIMIT, 900):
-            wm_draw.text((col, row), "HAO HARBOUR", font=f_wm, fill=(180, 180, 180, 35))
-    rotated_wm = wm_layer.rotate(25, expand=False)
+    wm_color = (180, 180, 180, 75)
+    wm_txt = "Hao Harbour Intelligence" if lang == "English" else "Hao Harbour 合同深度分析"
+    for i in range(0, canvas.size[1], 1000):
+        wm_draw.text((150, i + 400), wm_txt, font=f_wm, fill=wm_color)
+    rotated_wm = wm_layer.rotate(35, expand=False)
     canvas.paste(rotated_wm, (0, 0), rotated_wm)
 
-    # 6. 页脚
-    footer_h = 350
-    final_y = y + 150
-    final_canvas = canvas.crop((0, 0, CANVAS_W, int(final_y + footer_h)))
+    # 7. 页脚
+    footer_height = 320
+    total_y = y + 250 + footer_height
+    final_canvas = canvas.crop((0, 0, 1200, int(total_y)))
     f_draw = ImageDraw.Draw(final_canvas)
-    f_draw.rectangle([(0, final_y), (CANVAS_W, final_y + footer_h)], fill=(245, 245, 245))
-    
-    f_lines = get_lines_absolute(L["Disclaimer"], f_footer, MAX_TEXT_W)
-    fy = final_y + 90
-    for fl in f_lines:
-        f_draw.text((LEFT_MARGIN, fy), fl, font=f_footer, fill=(150, 150, 150))
-        fy += f_footer.size + 15
+    f_y = total_y - (footer_height - 30)
+    f_draw.rectangle([(0, f_y), (1200, total_y)], fill=(245, 245, 245))
+    draw_wrapped_text(f_draw, L["Disclaimer"], 60, f_y + 80, f_footer, 1080, fill=(140, 140, 140), line_h=1.5)
 
     return final_canvas
-# 调用示例：
-# pdf_image = create_contract_analysis_pdf(result_data, lang="中文")
-# pdf_image.save("analysis_report.pdf", "PDF", resolution=100.0)
+
+
 # --- 初始化带看报告状态 ---
 if 'viewing_items' not in st.session_state:
     st.session_state['viewing_items'] = {
@@ -992,7 +1334,7 @@ if ws:
                         st.rerun()
 
     with t2:
-        data = ws.get_all_records()
+        data = get_safe_records(ws)
         if data:
             df = pd.DataFrame(data)
             
@@ -1382,7 +1724,7 @@ if ws:
         st.subheader("📊 房源对比 & 市场简报")
         
         st.markdown("#### 1️⃣ 房源横向对比")
-        all_props = ws.get_all_records()
+        all_props = get_safe_records(ws)
         if all_props:
             titles = [f"{r['title']} (£{r['price']})" for r in all_props]
             selected_names = st.multiselect("选择需要对比的房源 (最多4个)", options=titles, max_selections=4)
