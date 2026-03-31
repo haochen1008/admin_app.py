@@ -1009,12 +1009,19 @@ if ws:
                         p_lat = rm_data.get('lat', '')
                         p_lng = rm_data.get('lng', '')
                         # Index 10 is reserved for manual walkingMinutes to ensure backward compatibility
-                        ws.append_row([now, p_name, p_reg, p_rooms, int(p_price), img_url, zh_desc, 0, 0, p_station, "", p_lat, p_lng])
-                        st.success("发布成功！海报已存档。")
-                        st.rerun()
+                        try:
+                            ws.append_row([now, p_name, p_reg, p_rooms, int(p_price), img_url, zh_desc, 0, 0, p_station, "", p_lat, p_lng])
+                            st.success("发布成功！海报已存档。")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"⚠️ 发布失败，Google Sheets 写入出错：{e}")
 
     with t2:
-        data = ws.get_all_records()
+        try:
+            data = ws.get_all_records()
+        except Exception as e:
+            st.error(f"⚠️ Google Sheets 读取失败，请检查服务账号权限或网络连接。\n\n错误详情：{e}")
+            data = []
         if data:
             df = pd.DataFrame(data)
             
@@ -1055,11 +1062,17 @@ if ws:
                         
                         s1, s2 = st.columns(2)
                         if s1.form_submit_button("保存"):
-                            ws.update(f"A{idx}:I{idx}", [[row['date'], nt, nr, nrm, np, row['poster-link'], nd, row['views'], 1 if isf else 0]])
-                            st.rerun()
+                            try:
+                                ws.update(f"A{idx}:I{idx}", [[row['date'], nt, nr, nrm, np, row['poster-link'], nd, row['views'], 1 if isf else 0]])
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"⚠️ 保存失败，请检查 Google Sheets 权限：{e}")
                         if s2.form_submit_button("删除"):
-                            ws.delete_rows(idx)
-                            st.rerun()
+                            try:
+                                ws.delete_rows(idx)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"⚠️ 删除失败，请检查 Google Sheets 权限：{e}")
                     
                     # --- Multi-version Copywriting ---
                     st.markdown("💬 **一键私域营销话术**")
@@ -1404,7 +1417,11 @@ if ws:
         st.subheader("📊 房源对比 & 市场简报")
         
         st.markdown("#### 1️⃣ 房源横向对比")
-        all_props = ws.get_all_records()
+        try:
+            all_props = ws.get_all_records()
+        except Exception as e:
+            st.error(f"⚠️ Google Sheets 读取失败，请检查服务账号权限或网络连接。\n\n错误详情：{e}")
+            all_props = []
         if all_props:
             titles = [f"{r['title']} (£{r['price']})" for r in all_props]
             selected_names = st.multiselect("选择需要对比的房源 (最多4个)", options=titles, max_selections=4)
