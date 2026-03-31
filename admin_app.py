@@ -676,7 +676,7 @@ def parse_ai_json(text: str) -> Dict[str, Any]:
     except:
         return {}
 
-def extract_contract_pro(pdf_file) -> Dict[str, Any]:
+def extract_contract_pro(pdf_file, target_lang="中文") -> Dict[str, Any]:
     """深度提取合同关键信息并返回结构化数据（Deep Dive 3.0）"""
     if not pdfplumber: return {"error": "⚠️ 未安装 pdfplumber 依赖，无法解析 PDF。"}
     try:
@@ -687,23 +687,27 @@ def extract_contract_pro(pdf_file) -> Dict[str, Any]:
                 text += page.extract_text() or ""
         
         api_key = st.secrets["OPENAI_API_KEY"]
+        lang_instruction = f"All your summaries and highlights MUST be written in {target_lang}."
+        if target_lang == "中文":
+            lang_instruction += " 内容必须使用中文。"
+        
         prompt = (
-            "你是一个专业的英国房屋租赁法务专家。请深度阅读并分析这段 AST 合同文本，并将其分解为多个部分，以 JSON 格式输出。\n"
-            "要求：\n"
-            "1. 务必提取基础元数据：房东、租客、房屋地址、月租(Rent PCM)、押金(Deposit)、起租日期(Starting Date/Commencement Date)、终止日期、租期时长、解约条款(Break Clause)。\n"
-            "2. 除了元数据，请识别合同中的每个大模块（如 Tenant's Obligation, Landlord's Covenants, End of Tenancy, Special Clauses 等）。\n"
-            "3. 对每个模块进行深度的要点总结，不要遗漏任何关于维修、杂费(Bills)支付、转租、宠物、退房清洁等细节。\n\n"
+            f"你是一个专业的英国房屋租赁法务专家。请深度阅读并分析这段 AST 合同文本，并将其分解为多个部分，以 JSON 格式输出。\n"
+            f"要求：\n"
+            f"1. 务必提取基础元数据：房东、租客、房屋地址、月租(Rent PCM)、押金(Deposit)、起租日期(Starting Date/Commencement Date)、终止日期、租期时长、解约条款(Break Clause)。\n"
+            f"2. 除了元数据，请识别合同中的每个大模块（如 Tenant's Obligation, Landlord's Covenants, End of Tenancy, Special Clauses 等）。\n"
+            f"3. 对每个模块进行深度的要点总结，不要遗漏任何关于维修、杂费(Bills)支付、转租、宠物、退房清洁等细节。\n\n"
+            f"{lang_instruction}\n\n"
             "JSON 结构要求：\n"
             "{\n"
             "  \"Metadata\": {\"Landlord\": \"\", \"Tenant\": \"\", \"Address\": \"\", \"RentPCM\": \"\", \"Deposit\": \"\", \"StartDate\": \"\", \"EndDate\": \"\", \"Term\": \"\", \"BreakClause\": \"\"},\n"
             "  \"Sections\": [\n"
-            "    {\"Heading\": \"模块标题（如：租客责任）\", \"Content\": \"该部分的深度总结...\"},\n"
+            "    {\"Heading\": \"模块标题\", \"Content\": \"该部分的深度总结...\"},\n"
             "    {\"Heading\": \"模块标题\", \"Content\": \"内容...\"}\n"
             "  ],\n"
-            "  \"Risks\": \"列出不合理或高风险的条款（如果没有请写无）\",\n"
-            "  \"Summary\": \"全篇核心概括\"\n"
+            "  \"Risks\": \"列出风险点\",\n"
+            "  \"Summary\": \"总结\"\n"
             "}\n"
-            "内容必须使用中文。对于 Utilities (Council Tax, Water, Gas, etc.)，请务必在摘要或相应模块中写明是谁付钱。"
         )
         r = requests.post("https://api.deepseek.com/chat/completions",
             json={"model": "deepseek-chat", "messages": [
@@ -717,9 +721,31 @@ def extract_contract_pro(pdf_file) -> Dict[str, Any]:
     except Exception as e:
         return {"error": f"❌ 提取失败: {e}"}
 
-def create_contract_analysis_pdf(data: Dict[str, Any]):
-    """将合同分析结果生成为专业 PDF (Deep Dive 版)"""
+def create_contract_analysis_pdf(data: Dict[str, Any], lang="中文"):
+    """将合同分析结果生成为专业 PDF (Bilingual 3.5)"""
     
+    LABEL_MAP = {
+        "中文": {
+            "Title": "HAO HARBOUR - 合同深度智慧分析报告",
+            "MetaTitle": "【 基本财务 & 关键条文概览 】",
+            "Landlord": "房东 (Landlord)", "Tenant": "租客 (Tenant)", "Address": "房屋地址",
+            "Rent": "月租 (Rent PCM)", "Deposit": "押金 (Deposit)", "StartDate": "起租日期",
+            "EndDate": "终止日期", "Term": "租期时长", "Break": "解约条款 (Break)",
+            "RiskTitle": "【 综合风险观察 】", "RiskDefault": "无显著高危条款",
+            "Disclaimer": "本报告旨在协助合同阅读，Hao Haobour方对应内容不承担任何法律担保责任。请务必结合合同原文并咨询法律专家。"
+        },
+        "English": {
+            "Title": "HAO HARBOUR - Deep Dive Contract Intelligence Report",
+            "MetaTitle": "[ Core Financials & Key Terms Overview ]",
+            "Landlord": "Landlord", "Tenant": "Tenant", "Address": "Address",
+            "Rent": "Rent (PCM)", "Deposit": "Deposit", "StartDate": "Starting Date",
+            "EndDate": "Ending Date", "Term": "Term", "Break": "Break Clause",
+            "RiskTitle": "[ Comprehensive Risk Observation ]", "RiskDefault": "No critical risks identified",
+            "Disclaimer": "This report is for assistance only. Hao Harbour assumes no legal liability. Please consult a legal professional before signing."
+        }
+    }
+    L = LABEL_MAP[lang]
+
     try:
         f_header = ImageFont.truetype("simhei.ttf", 45)
         f_section = ImageFont.truetype("simhei.ttf", 38)
@@ -798,28 +824,29 @@ def create_contract_analysis_pdf(data: Dict[str, Any]):
             y += font.size + 15
         return y
 
-    def draw_row(draw, y, label, val, font_label, font_val, x_label=80, x_val=400):
-        draw.text((x_label, y), f"{label}:", font=font_label, fill=(100, 100, 100))
-        draw.text((x_val, y), str(val), font=font_val, fill=(40, 40, 40))
-        return y + 65
+    def draw_meta_row(draw, y, label, val, font_label, font_val):
+        draw.text((80, y), f"{label}:", font=font_label, fill=(100, 100, 100))
+        # 房屋地址和解约条款可能非常长，需要自动换行
+        new_y = draw_wrapped_text(draw, val, 400, y, font_val, 720, fill=(40, 40, 40))
+        return max(y + 65, new_y)
 
     # 1. 页眉 Banner
     draw.rectangle([(0, 0), (1200, 160)], fill=(26, 26, 26))
-    draw.text((60, 50), "HAO HARBOUR - 合同深度智慧分析报告", font=f_banner, fill=(191, 160, 100))
+    draw.text((60, 50), L["Title"], font=f_banner, fill=(191, 160, 100))
     
     y = 220
     # 2. 基础财务 & 关键日期
-    draw.text((60, y), "【 基本财务 & 关键条文概览 】", font=f_section, fill=(191, 160, 100))
+    draw.text((60, y), L["MetaTitle"], font=f_section, fill=(191, 160, 100))
     y += 85
-    y = draw_row(draw, y, "房东 (Landlord)", meta.get('Landlord', ''), f_label, f_body)
-    y = draw_row(draw, y, "租客 (Tenant)", meta.get('Tenant', ''), f_label, f_body)
-    y = draw_row(draw, y, "房屋地址", meta.get('Address', ''), f_label, f_body)
-    y = draw_row(draw, y, "月租 (Rent PCM)", meta.get('RentPCM', ''), f_label, f_body)
-    y = draw_row(draw, y, "押金 (Deposit)", meta.get('Deposit', ''), f_label, f_body)
-    y = draw_row(draw, y, "起租日期", meta.get('StartDate', ''), f_label, f_body)
-    y = draw_row(draw, y, "终止日期", meta.get('EndDate', ''), f_label, f_body)
-    y = draw_row(draw, y, "租期时长", meta.get('Term', ''), f_label, f_body)
-    y = draw_row(draw, y, "解约条款 (Break)", meta.get('BreakClause', ''), f_label, f_body)
+    y = draw_meta_row(draw, y, L["Landlord"], meta.get('Landlord', ''), f_label, f_body)
+    y = draw_meta_row(draw, y, L["Tenant"], meta.get('Tenant', ''), f_label, f_body)
+    y = draw_meta_row(draw, y, L["Address"], meta.get('Address', ''), f_label, f_body)
+    y = draw_meta_row(draw, y, L["Rent"], meta.get('RentPCM', ''), f_label, f_body)
+    y = draw_meta_row(draw, y, L["Deposit"], meta.get('Deposit', ''), f_label, f_body)
+    y = draw_meta_row(draw, y, L["StartDate"], meta.get('StartDate', ''), f_label, f_body)
+    y = draw_meta_row(draw, y, L["EndDate"], meta.get('EndDate', ''), f_label, f_body)
+    y = draw_meta_row(draw, y, L["Term"], meta.get('Term', ''), f_label, f_body)
+    y = draw_meta_row(draw, y, L["Break"], meta.get('BreakClause', ''), f_label, f_body)
     
     y += 50
     # 3. 逐章节核心分析 (Clause-by-Clause Highlights)
@@ -1386,15 +1413,18 @@ if ws:
             st.markdown("#### 📄 合同关键信息智能提取")
             st.info("上传 PDF 合同，AI 将自动分析核心条款及潜在风险。")
             contract_file = st.file_uploader("点击上传 PDF 合同", type="pdf")
+            v3_lang = st.radio("希望分析出的语言 (Language)", ["中文", "English"], horizontal=True)
+
             if st.button("🧠 开始全合同深度解析 (Deep Dive 3.0)", type="primary"):
                 if contract_file:
                     with st.spinner("AI 正在逐章节阅读并提取核心条款 (约60-90秒)..."):
-                        res = extract_contract_pro(contract_file)
+                        res = extract_contract_pro(contract_file, target_lang=v3_lang)
                         if "error" in res:
                             st.error(res["error"])
                         else:
                             # 存储 Deep Dive 数据结构
                             st.session_state['contract_v3'] = res
+                            st.session_state['contract_v3_lang'] = v3_lang
                 else:
                     st.warning("请先上传文件")
 
@@ -1450,7 +1480,7 @@ if ws:
                 st.markdown("---")
                 if st.button("🎨 导出全合同深度分析 PDF", key="v3_pdf_gen", use_container_width=True):
                     with st.spinner("正在排版长篇报告 PDF (含水印)..."):
-                        p_img = create_contract_analysis_pdf(v3)
+                        p_img = create_contract_analysis_pdf(v3, lang=st.session_state.get('contract_v3_lang', '中文'))
                         buf_v3 = BytesIO()
                         p_img.save(buf_v3, format="PDF", resolution=100.0)
                         st.download_button("⬇️ 立即下载深度报告 PDF", data=buf_v3.getvalue(), 
