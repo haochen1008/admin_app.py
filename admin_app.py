@@ -77,9 +77,6 @@ def get_ws():
         return None
 
 
-
-
-
 def get_safe_records(ws):
     """
     Robust version of get_all_records() that avoids GSpreadException
@@ -89,29 +86,6 @@ def get_safe_records(ws):
         raw_rows = ws.get_all_values()
         if not raw_rows: return []
         headers = raw_rows[0]
-        data_rows = raw_rows[1:]
-        clean_headers = []
-        seen = {}
-        for i, h in enumerate(headers):
-            h = str(h).strip()
-            if not h: h = f"Unnamed_{i}"
-            if h in seen:
-                seen[h] += 1
-                clean_headers.append(f"{h}_{seen[h]}")
-            else:
-                seen[h] = 0
-                clean_headers.append(h)
-        records = []
-        for row in data_rows:
-            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
-            records.append(dict(zip(clean_headers, row)))
-        return records
-    except Exception as e:
-        import streamlit as st
-        st.error(f"⚠️ Read Error: {e}")
-        return []
-
-headers = raw_rows[0]
         data_rows = raw_rows[1:]
         clean_headers = []
         seen = {}
@@ -257,32 +231,7 @@ def scrape_rightmove(url):
     }
     try:
         if not url or "rightmove.co.uk" not in url:
-            return None
-
-
-headers = raw_rows[0]
-        data_rows = raw_rows[1:]
-        clean_headers = []
-        seen = {}
-        for i, h in enumerate(headers):
-            h = str(h).strip()
-            if not h: h = f"Unnamed_{i}"
-            if h in seen:
-                seen[h] += 1
-                clean_headers.append(f"{h}_{seen[h]}")
-            else:
-                seen[h] = 0
-                clean_headers.append(h)
-        records = []
-        for row in data_rows:
-            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
-            records.append(dict(zip(clean_headers, row)))
-        return records
-    except Exception as e:
-        import streamlit as st
-        st.error(f"⚠️ Read Error: {e}")
-        return []
-, "无效的 Rightmove 链接"
+            return None, "无效的 Rightmove 链接"
         res = requests.get(url, headers=headers, timeout=15)
         res.raise_for_status()
         html = res.text
@@ -292,32 +241,7 @@ headers = raw_rows[0]
                 data, _ = json.JSONDecoder().raw_decode(page_model_raw)
                 p_data = data.get('propertyData', {})
             except json.JSONDecodeError as e:
-                return None
-
-
-headers = raw_rows[0]
-        data_rows = raw_rows[1:]
-        clean_headers = []
-        seen = {}
-        for i, h in enumerate(headers):
-            h = str(h).strip()
-            if not h: h = f"Unnamed_{i}"
-            if h in seen:
-                seen[h] += 1
-                clean_headers.append(f"{h}_{seen[h]}")
-            else:
-                seen[h] = 0
-                clean_headers.append(h)
-        records = []
-        for row in data_rows:
-            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
-            records.append(dict(zip(clean_headers, row)))
-        return records
-    except Exception as e:
-        import streamlit as st
-        st.error(f"⚠️ Read Error: {e}")
-        return []
-, f"JSON解析失败: {e}"
+                return None, f"JSON解析失败: {e}"
             
             if p_data:
                 raw_title = p_data.get('text', {}).get('pageTitle', '')
@@ -397,59 +321,9 @@ headers = raw_rows[0]
                     'lat': lat,
                     'lng': lng
                 }, None
-        return None
-
-
-headers = raw_rows[0]
-        data_rows = raw_rows[1:]
-        clean_headers = []
-        seen = {}
-        for i, h in enumerate(headers):
-            h = str(h).strip()
-            if not h: h = f"Unnamed_{i}"
-            if h in seen:
-                seen[h] += 1
-                clean_headers.append(f"{h}_{seen[h]}")
-            else:
-                seen[h] = 0
-                clean_headers.append(h)
-        records = []
-        for row in data_rows:
-            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
-            records.append(dict(zip(clean_headers, row)))
-        return records
+        return None, "无法解析数据，请检查链接是否为房源页"
     except Exception as e:
-        import streamlit as st
-        st.error(f"⚠️ Read Error: {e}")
-        return []
-, "无法解析数据，请检查链接是否为房源页"
-    except Exception as e:
-        return None
-
-
-headers = raw_rows[0]
-        data_rows = raw_rows[1:]
-        clean_headers = []
-        seen = {}
-        for i, h in enumerate(headers):
-            h = str(h).strip()
-            if not h: h = f"Unnamed_{i}"
-            if h in seen:
-                seen[h] += 1
-                clean_headers.append(f"{h}_{seen[h]}")
-            else:
-                seen[h] = 0
-                clean_headers.append(h)
-        records = []
-        for row in data_rows:
-            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
-            records.append(dict(zip(clean_headers, row)))
-        return records
-    except Exception as e:
-        import streamlit as st
-        st.error(f"⚠️ Read Error: {e}")
-        return []
-, f"抓取失败: {e}"
+        return None, f"抓取失败: {e}"
 
 # --- 4. 核心：海报引擎 (仅修改 display_text 拼接) ---
 def create_poster(files, title, price, rooms, region="伦敦"):
@@ -511,31 +385,6 @@ def create_poster(files, title, price, rooms, region="伦敦"):
     except Exception as e:
         st.error(f"海报生成出错: {e}")
         return None
-
-
-headers = raw_rows[0]
-        data_rows = raw_rows[1:]
-        clean_headers = []
-        seen = {}
-        for i, h in enumerate(headers):
-            h = str(h).strip()
-            if not h: h = f"Unnamed_{i}"
-            if h in seen:
-                seen[h] += 1
-                clean_headers.append(f"{h}_{seen[h]}")
-            else:
-                seen[h] = 0
-                clean_headers.append(h)
-        records = []
-        for row in data_rows:
-            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
-            records.append(dict(zip(clean_headers, row)))
-        return records
-    except Exception as e:
-        import streamlit as st
-        st.error(f"⚠️ Read Error: {e}")
-        return []
-
 # --- 4b. 微信方版海报 1080x1080 ---
 def create_wechat_poster(files, title, price, rooms, region="伦敦"):
     try:
@@ -574,31 +423,6 @@ def create_wechat_poster(files, title, price, rooms, region="伦敦"):
     except Exception as e:
         st.error(f"微信海报生成出错: {e}")
         return None
-
-
-headers = raw_rows[0]
-        data_rows = raw_rows[1:]
-        clean_headers = []
-        seen = {}
-        for i, h in enumerate(headers):
-            h = str(h).strip()
-            if not h: h = f"Unnamed_{i}"
-            if h in seen:
-                seen[h] += 1
-                clean_headers.append(f"{h}_{seen[h]}")
-            else:
-                seen[h] = 0
-                clean_headers.append(h)
-        records = []
-        for row in data_rows:
-            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
-            records.append(dict(zip(clean_headers, row)))
-        return records
-    except Exception as e:
-        import streamlit as st
-        st.error(f"⚠️ Read Error: {e}")
-        return []
-
 
 # --- 4c. 抖音/Story 竖版海报 1080x1920 ---
 def create_story_poster(files, title, price, rooms, region="伦敦"):
@@ -643,31 +467,6 @@ def create_story_poster(files, title, price, rooms, region="伦敦"):
     except Exception as e:
         st.error(f"抖音海报生成出错: {e}")
         return None
-
-
-headers = raw_rows[0]
-        data_rows = raw_rows[1:]
-        clean_headers = []
-        seen = {}
-        for i, h in enumerate(headers):
-            h = str(h).strip()
-            if not h: h = f"Unnamed_{i}"
-            if h in seen:
-                seen[h] += 1
-                clean_headers.append(f"{h}_{seen[h]}")
-            else:
-                seen[h] = 0
-                clean_headers.append(h)
-        records = []
-        for row in data_rows:
-            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
-            records.append(dict(zip(clean_headers, row)))
-        return records
-    except Exception as e:
-        import streamlit as st
-        st.error(f"⚠️ Read Error: {e}")
-        return []
-
 
 # --- 4d. 抖音口播脚本生成 ---
 def gen_douyin_script(title: str, price: int, rooms: str, region: str, desc: str) -> str:
@@ -891,31 +690,6 @@ def gen_comparison_image(selected_props: List[Dict]) -> Image.Image:
 # --- 4g. 市场热度研究 (Trends) ---
 def get_market_trends(keyword: str = "London Rent"):
     if not TrendReq: return None
-
-
-headers = raw_rows[0]
-        data_rows = raw_rows[1:]
-        clean_headers = []
-        seen = {}
-        for i, h in enumerate(headers):
-            h = str(h).strip()
-            if not h: h = f"Unnamed_{i}"
-            if h in seen:
-                seen[h] += 1
-                clean_headers.append(f"{h}_{seen[h]}")
-            else:
-                seen[h] = 0
-                clean_headers.append(h)
-        records = []
-        for row in data_rows:
-            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
-            records.append(dict(zip(clean_headers, row)))
-        return records
-    except Exception as e:
-        import streamlit as st
-        st.error(f"⚠️ Read Error: {e}")
-        return []
-
     try:
         pytrends = TrendReq(hl='en-US', tz=360)
         pytrends.build_payload([keyword], cat=0, timeframe='today 3-m', geo='GB-LND')
@@ -923,31 +697,6 @@ headers = raw_rows[0]
         return df
     except:
         return None
-
-
-headers = raw_rows[0]
-        data_rows = raw_rows[1:]
-        clean_headers = []
-        seen = {}
-        for i, h in enumerate(headers):
-            h = str(h).strip()
-            if not h: h = f"Unnamed_{i}"
-            if h in seen:
-                seen[h] += 1
-                clean_headers.append(f"{h}_{seen[h]}")
-            else:
-                seen[h] = 0
-                clean_headers.append(h)
-        records = []
-        for row in data_rows:
-            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
-            records.append(dict(zip(clean_headers, row)))
-        return records
-    except Exception as e:
-        import streamlit as st
-        st.error(f"⚠️ Read Error: {e}")
-        return []
-
 
 # --- 4h. 合同提取 (AI) ---
 
