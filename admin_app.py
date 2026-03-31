@@ -111,6 +111,28 @@ def get_safe_records(ws):
         st.error(f"⚠️ Read Error: {e}")
         return []
 
+headers = raw_rows[0]
+        data_rows = raw_rows[1:]
+        clean_headers = []
+        seen = {}
+        for i, h in enumerate(headers):
+            h = str(h).strip()
+            if not h: h = f"Unnamed_{i}"
+            if h in seen:
+                seen[h] += 1
+                clean_headers.append(f"{h}_{seen[h]}")
+            else:
+                seen[h] = 0
+                clean_headers.append(h)
+        records = []
+        for row in data_rows:
+            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
+            records.append(dict(zip(clean_headers, row)))
+        return records
+    except Exception as e:
+        import streamlit as st
+        st.error(f"⚠️ Read Error: {e}")
+        return []
 
 
 # --- 3. 智能伦敦分区 ---
@@ -238,6 +260,28 @@ def scrape_rightmove(url):
             return None
 
 
+headers = raw_rows[0]
+        data_rows = raw_rows[1:]
+        clean_headers = []
+        seen = {}
+        for i, h in enumerate(headers):
+            h = str(h).strip()
+            if not h: h = f"Unnamed_{i}"
+            if h in seen:
+                seen[h] += 1
+                clean_headers.append(f"{h}_{seen[h]}")
+            else:
+                seen[h] = 0
+                clean_headers.append(h)
+        records = []
+        for row in data_rows:
+            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
+            records.append(dict(zip(clean_headers, row)))
+        return records
+    except Exception as e:
+        import streamlit as st
+        st.error(f"⚠️ Read Error: {e}")
+        return []
 , "无效的 Rightmove 链接"
         res = requests.get(url, headers=headers, timeout=15)
         res.raise_for_status()
@@ -251,6 +295,28 @@ def scrape_rightmove(url):
                 return None
 
 
+headers = raw_rows[0]
+        data_rows = raw_rows[1:]
+        clean_headers = []
+        seen = {}
+        for i, h in enumerate(headers):
+            h = str(h).strip()
+            if not h: h = f"Unnamed_{i}"
+            if h in seen:
+                seen[h] += 1
+                clean_headers.append(f"{h}_{seen[h]}")
+            else:
+                seen[h] = 0
+                clean_headers.append(h)
+        records = []
+        for row in data_rows:
+            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
+            records.append(dict(zip(clean_headers, row)))
+        return records
+    except Exception as e:
+        import streamlit as st
+        st.error(f"⚠️ Read Error: {e}")
+        return []
 , f"JSON解析失败: {e}"
             
             if p_data:
@@ -334,11 +400,55 @@ def scrape_rightmove(url):
         return None
 
 
+headers = raw_rows[0]
+        data_rows = raw_rows[1:]
+        clean_headers = []
+        seen = {}
+        for i, h in enumerate(headers):
+            h = str(h).strip()
+            if not h: h = f"Unnamed_{i}"
+            if h in seen:
+                seen[h] += 1
+                clean_headers.append(f"{h}_{seen[h]}")
+            else:
+                seen[h] = 0
+                clean_headers.append(h)
+        records = []
+        for row in data_rows:
+            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
+            records.append(dict(zip(clean_headers, row)))
+        return records
+    except Exception as e:
+        import streamlit as st
+        st.error(f"⚠️ Read Error: {e}")
+        return []
 , "无法解析数据，请检查链接是否为房源页"
     except Exception as e:
         return None
 
 
+headers = raw_rows[0]
+        data_rows = raw_rows[1:]
+        clean_headers = []
+        seen = {}
+        for i, h in enumerate(headers):
+            h = str(h).strip()
+            if not h: h = f"Unnamed_{i}"
+            if h in seen:
+                seen[h] += 1
+                clean_headers.append(f"{h}_{seen[h]}")
+            else:
+                seen[h] = 0
+                clean_headers.append(h)
+        records = []
+        for row in data_rows:
+            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
+            records.append(dict(zip(clean_headers, row)))
+        return records
+    except Exception as e:
+        import streamlit as st
+        st.error(f"⚠️ Read Error: {e}")
+        return []
 , f"抓取失败: {e}"
 
 # --- 4. 核心：海报引擎 (仅修改 display_text 拼接) ---
@@ -403,6 +513,28 @@ def create_poster(files, title, price, rooms, region="伦敦"):
         return None
 
 
+headers = raw_rows[0]
+        data_rows = raw_rows[1:]
+        clean_headers = []
+        seen = {}
+        for i, h in enumerate(headers):
+            h = str(h).strip()
+            if not h: h = f"Unnamed_{i}"
+            if h in seen:
+                seen[h] += 1
+                clean_headers.append(f"{h}_{seen[h]}")
+            else:
+                seen[h] = 0
+                clean_headers.append(h)
+        records = []
+        for row in data_rows:
+            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
+            records.append(dict(zip(clean_headers, row)))
+        return records
+    except Exception as e:
+        import streamlit as st
+        st.error(f"⚠️ Read Error: {e}")
+        return []
 
 # --- 4b. 微信方版海报 1080x1080 ---
 def create_wechat_poster(files, title, price, rooms, region="伦敦"):
@@ -444,6 +576,28 @@ def create_wechat_poster(files, title, price, rooms, region="伦敦"):
         return None
 
 
+headers = raw_rows[0]
+        data_rows = raw_rows[1:]
+        clean_headers = []
+        seen = {}
+        for i, h in enumerate(headers):
+            h = str(h).strip()
+            if not h: h = f"Unnamed_{i}"
+            if h in seen:
+                seen[h] += 1
+                clean_headers.append(f"{h}_{seen[h]}")
+            else:
+                seen[h] = 0
+                clean_headers.append(h)
+        records = []
+        for row in data_rows:
+            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
+            records.append(dict(zip(clean_headers, row)))
+        return records
+    except Exception as e:
+        import streamlit as st
+        st.error(f"⚠️ Read Error: {e}")
+        return []
 
 
 # --- 4c. 抖音/Story 竖版海报 1080x1920 ---
@@ -491,6 +645,28 @@ def create_story_poster(files, title, price, rooms, region="伦敦"):
         return None
 
 
+headers = raw_rows[0]
+        data_rows = raw_rows[1:]
+        clean_headers = []
+        seen = {}
+        for i, h in enumerate(headers):
+            h = str(h).strip()
+            if not h: h = f"Unnamed_{i}"
+            if h in seen:
+                seen[h] += 1
+                clean_headers.append(f"{h}_{seen[h]}")
+            else:
+                seen[h] = 0
+                clean_headers.append(h)
+        records = []
+        for row in data_rows:
+            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
+            records.append(dict(zip(clean_headers, row)))
+        return records
+    except Exception as e:
+        import streamlit as st
+        st.error(f"⚠️ Read Error: {e}")
+        return []
 
 
 # --- 4d. 抖音口播脚本生成 ---
@@ -717,6 +893,28 @@ def get_market_trends(keyword: str = "London Rent"):
     if not TrendReq: return None
 
 
+headers = raw_rows[0]
+        data_rows = raw_rows[1:]
+        clean_headers = []
+        seen = {}
+        for i, h in enumerate(headers):
+            h = str(h).strip()
+            if not h: h = f"Unnamed_{i}"
+            if h in seen:
+                seen[h] += 1
+                clean_headers.append(f"{h}_{seen[h]}")
+            else:
+                seen[h] = 0
+                clean_headers.append(h)
+        records = []
+        for row in data_rows:
+            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
+            records.append(dict(zip(clean_headers, row)))
+        return records
+    except Exception as e:
+        import streamlit as st
+        st.error(f"⚠️ Read Error: {e}")
+        return []
 
     try:
         pytrends = TrendReq(hl='en-US', tz=360)
@@ -727,6 +925,28 @@ def get_market_trends(keyword: str = "London Rent"):
         return None
 
 
+headers = raw_rows[0]
+        data_rows = raw_rows[1:]
+        clean_headers = []
+        seen = {}
+        for i, h in enumerate(headers):
+            h = str(h).strip()
+            if not h: h = f"Unnamed_{i}"
+            if h in seen:
+                seen[h] += 1
+                clean_headers.append(f"{h}_{seen[h]}")
+            else:
+                seen[h] = 0
+                clean_headers.append(h)
+        records = []
+        for row in data_rows:
+            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
+            records.append(dict(zip(clean_headers, row)))
+        return records
+    except Exception as e:
+        import streamlit as st
+        st.error(f"⚠️ Read Error: {e}")
+        return []
 
 
 # --- 4h. 合同提取 (AI) ---
@@ -760,26 +980,19 @@ def extract_contract_pro(pdf_file, target_lang="中文") -> Dict[str, Any]:
             f"要求：\n"
             f"1. 务必提取基础元数据：房东、租客、房屋地址、月租(Rent PCM)、押金(Deposit)、起租日期(Starting Date/Commencement Date)、终止日期、租期时长、解约条款(Break Clause)。\n"
             f"2. 除了元数据，请识别合同中的每个大模块（如 Tenant's Obligation, Landlord's Covenants, End of Tenancy, Special Clauses 等）。\n"
-            f"3. 对每个模块进行深度的分析，总结核心条款、潜在风险，并高亮对租客不利的内容。\n"
+            f"3. 对每个模块进行深度的     for s in data.get('Sections', []):
+            f"分析，总结核心条款、潜在风险，并高亮对租客不利的内容。\n"
             f"{lang_instruction}\n"
-            f"必须以 JSON 格式返回，包含: Metadata (Dict), Sections (List of Headings/Content), Risks (String), Summary (String)。"
-        )
-
-        r = requests.post("https://api.deepseek.com/chat/completions",
-            json={
-                "model": "deepseek-chat", 
-                "messages": [{"role": "system", "content": prompt}, {"role": "user", "content": text[:32000]}],
-                "response_format": {"type": "json_object"}
-            },
-            headers={"Authorization": f"Bearer {api_key}"}, timeout=60)
-
-        data = parse_ai_json(r.json()['choices'][0]['message']['content'])
-        sections = []
-        for s in data.get('Sections', []):
-            sections.append({
-                "Heading": sanitize_text(s.get("Heading", "")),
-                "Content": sanitize_text(s.get("Content", "")),
-            })
+            f"必须以 JSON 格式返回，包含: Metadata (Dict), Sections (List), Risks (String), Summary (String)。"\n
+        )\n
+        r = requests.post("https://api.deepseek.com/chat/completions",\n
+            json={"model": "deepseek-chat", "messages": [{"role": "system", "content": prompt}, {"role": "user", "content": text[:30000]}], "response_format": {"type": "json_object"}},\n
+            headers={"Authorization": f"Bearer {api_key}"}, timeout=60)\n
+        data = parse_ai_json(r.json()['choices'][0]['message']['content'])\n
+        sections.append({
+            "Heading": sanitize_text(s.get('Heading', '')),
+            "Content": sanitize_text(s.get('Content', ''))
+        })
     
     risks_txt = sanitize_text(data.get('Risks', ''))
     summary_txt = sanitize_text(data.get('Summary', ''))
@@ -919,10 +1132,10 @@ t.truetype("simhei.ttf", 28)
     meta = {k: sanitize_text(v) for k, v in data.get('Metadata', {}).items()}
     sections = []
     for s in data.get('Sections', []):
-            sections.append({
-                "Heading": sanitize_text(s.get("Heading", "")),
-                "Content": sanitize_text(s.get("Content", "")),
-            })
+        sections.append({
+            "Heading": sanitize_text(s.get('Heading', '')),
+            "Content": sanitize_text(s.get('Content', ''))
+        })
     
     risks_txt = sanitize_text(data.get('Risks', ''))
     summary_txt = sanitize_text(data.get('Summary', ''))
@@ -1612,11 +1825,11 @@ if ws:
                         if st.button(f"🗑️ 删除此章节", key=f"rem_{i}"):
                             # 标记删除逻辑（通过不加入 new_sections 实现）
                             continue
-            sections.append({
+                        new_sections.append({"Heading": h_val, "Content": c_val})
                 
                 # 添加新章节功能
                 if st.button("➕ 添加一处自定义章节/备注"):
-            sections.append({
+                    new_sections.append({"Heading": "自定义条款", "Content": ""})
                 
                 v3['Sections'] = new_sections
 
