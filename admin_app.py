@@ -23,29 +23,29 @@ except ImportError:
     TrendReq = None
 
 
-# --- 1.1 报告生成器常量 ---
+# --- 1.1 鎶ュ憡鐢熸垚鍣ㄥ父閲?---
 VIEWING_CONTACT_WECHAT = "HaoHarbour"
 VIEWING_CONTACT_PHONE = "07450912493"
 VIEWING_DISCLAIMER = (
-    "本报告仅基于带看人员在现场的个人观察，不构成任何形式的法律建议、房屋测量报告或合同要约。"
-    "带看人员对隐藏缺陷、房屋结构问题或未来环境变化不承担法律责任，请客户在签约前务必自行核实关键信息。"
+    "鏈姤鍛婁粎鍩轰簬甯︾湅浜哄憳鍦ㄧ幇鍦虹殑涓汉瑙傚療锛屼笉鏋勬垚浠讳綍褰㈠紡鐨勬硶寰嬪缓璁€佹埧灞嬫祴閲忔姤鍛婃垨鍚堝悓瑕佺害銆?
+    "甯︾湅浜哄憳瀵归殣钘忕己闄枫€佹埧灞嬬粨鏋勯棶棰樻垨鏈潵鐜鍙樺寲涓嶆壙鎷呮硶寰嬭矗浠伙紝璇峰鎴峰湪绛剧害鍓嶅姟蹇呰嚜琛屾牳瀹炲叧閿俊鎭€?
 )
 
 VIEWING_DEFAULT_INTERIOR = [
-    "采光/通透度 (Natural Light)", "装修/家具维护 (Condition)", "窗户隔音/保暖 (Window Insulation)",
-    "墙体/窗框防潮 (Damp/Mould)", "手机信号 (Signal)", "水压/排水速度 (Water Pressure)",
-    "储物/收纳空间 (Storage)", "家电新旧 (Appliances)", "味道 (Smell)"
+    "閲囧厜/閫氶€忓害 (Natural Light)", "瑁呬慨/瀹跺叿缁存姢 (Condition)", "绐楁埛闅旈煶/淇濇殩 (Window Insulation)",
+    "澧欎綋/绐楁闃叉疆 (Damp/Mould)", "鎵嬫満淇″彿 (Signal)", "姘村帇/鎺掓按閫熷害 (Water Pressure)",
+    "鍌ㄧ墿/鏀剁撼绌洪棿 (Storage)", "瀹剁數鏂版棫 (Appliances)", "鍛抽亾 (Smell)"
 ]
 VIEWING_DEFAULT_BUILDING = [
-    "24h 前台/安全感 (Concierge)", "快递代收系统 (Parcel Handling)", "公区卫生/气味 (Cleanliness)",
-    "电梯数量/速度 (Lift Status)", "公共设施 (Gym/Lounge)"
+    "24h 鍓嶅彴/瀹夊叏鎰?(Concierge)", "蹇€掍唬鏀剁郴缁?(Parcel Handling)", "鍏尯鍗敓/姘斿懗 (Cleanliness)",
+    "鐢垫鏁伴噺/閫熷害 (Lift Status)", "鍏叡璁炬柦 (Gym/Lounge)"
 ]
 VIEWING_DEFAULT_NEIGHBORHOOD = [
-    "居住安静程度 (Quietness)", "街道整洁/安全 (Street Vibe)", "生活配套便利 (Shops/Cafe)",
-    "交通便捷程度 (Transport)", "施工/脚手架干扰 (Construction)"
+    "灞呬綇瀹夐潤绋嬪害 (Quietness)", "琛楅亾鏁存磥/瀹夊叏 (Street Vibe)", "鐢熸椿閰嶅渚垮埄 (Shops/Cafe)",
+    "浜ら€氫究鎹风▼搴?(Transport)", "鏂藉伐/鑴氭墜鏋跺共鎵?(Construction)"
 ]
 
-# --- 1. 初始化配置 ---
+# --- 1. 鍒濆鍖栭厤缃?---
 cloudinary.config(
     cloud_name = st.secrets["cloudinary"]["cloud_name"],
     api_key = st.secrets["cloudinary"]["api_key"],
@@ -62,7 +62,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. 数据库连接 ---
+# --- 2. 鏁版嵁搴撹繛鎺?---
 def get_ws():
     try:
         creds_dict = dict(st.secrets["gcp_service_account"])
@@ -73,12 +73,8 @@ def get_ws():
         )
         return gspread.authorize(creds).open("Hao_Harbour_DB").get_worksheet(0)
     except Exception as e:
-        st.error(f"数据库连接失败: {e}")
+        st.error(f"鏁版嵁搴撹繛鎺ュけ璐? {e}")
         return None
-
-
-
-
 
 def get_safe_records(ws):
     """
@@ -108,146 +104,123 @@ def get_safe_records(ws):
         return records
     except Exception as e:
         import streamlit as st
-        st.error(f"⚠️ Read Error: {e}")
-        return []
-
-headers = raw_rows[0]
-        data_rows = raw_rows[1:]
-        clean_headers = []
-        seen = {}
-        for i, h in enumerate(headers):
-            h = str(h).strip()
-            if not h: h = f"Unnamed_{i}"
-            if h in seen:
-                seen[h] += 1
-                clean_headers.append(f"{h}_{seen[h]}")
-            else:
-                seen[h] = 0
-                clean_headers.append(h)
-        records = []
-        for row in data_rows:
-            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
-            records.append(dict(zip(clean_headers, row)))
-        return records
-    except Exception as e:
-        import streamlit as st
-        st.error(f"⚠️ Read Error: {e}")
+        st.error(f"鈿狅笍 Read Error: {e}")
         return []
 
 
-# --- 3. 智能伦敦分区 ---
-# 基于英国邮编前缀（outward code）精准定位伦敦五大区
-# 数据来源：英国皇家邮政 + Google Maps 地理验证
+# --- 3. 鏅鸿兘浼︽暒鍒嗗尯 ---
+# 鍩轰簬鑻卞浗閭紪鍓嶇紑锛坥utward code锛夌簿鍑嗗畾浣嶄鸡鏁︿簲澶у尯
+# 鏁版嵁鏉ユ簮锛氳嫳鍥界殗瀹堕偖鏀?+ Google Maps 鍦扮悊楠岃瘉
 _POSTCODE_REGION: Dict[str, str] = {
-    # 中伦敦 (Central London) — EC / WC / W1 / SW1 / SE1 etc.
-    "EC1": "中伦敦", "EC2": "中伦敦", "EC3": "中伦敦", "EC4": "中伦敦",
-    "WC1": "中伦敦", "WC2": "中伦敦",
-    "W1":  "中伦敦", "W1A": "中伦敦", "W1B": "中伦敦", "W1C": "中伦敦",
-    "W1D": "中伦敦", "W1F": "中伦敦", "W1G": "中伦敦", "W1H": "中伦敦",
-    "W1J": "中伦敦", "W1K": "中伦敦", "W1S": "中伦敦", "W1T": "中伦敦",
-    "W1U": "中伦敦", "W1W": "中伦敦",
-    "SW1": "中伦敦", "SW1A": "中伦敦", "SW1E": "中伦敦", "SW1H": "中伦敦",
-    "SW1P": "中伦敦", "SW1V": "中伦敦", "SW1W": "中伦敦", "SW1X": "中伦敦",
-    "SW1Y": "中伦敦",
-    "SE1":  "中伦敦",
-    "N1C": "中伦敦",   # King's Cross area
-    # 东伦敦 (East London)
-    "E1":  "东伦敦", "E1W": "东伦敦", "E2":  "东伦敦", "E3":  "东伦敦",
-    "E4":  "东伦敦", "E5":  "东伦敦", "E6":  "东伦敦", "E7":  "东伦敦",
-    "E8":  "东伦敦", "E9":  "东伦敦", "E10": "东伦敦", "E11": "东伦敦",
-    "E12": "东伦敦", "E13": "东伦敦", "E14": "东伦敦", "E15": "东伦敦",
-    "E16": "东伦敦", "E17": "东伦敦", "E18": "东伦敦", "E20": "东伦敦",
-    "IG1": "东伦敦", "IG2": "东伦敦", "IG3": "东伦敦", "IG4": "东伦敦",
-    "IG5": "东伦敦", "IG6": "东伦敦", "IG7": "东伦敦", "IG8": "东伦敦",
-    "IG11": "东伦敦",
-    "RM1": "东伦敦", "RM2": "东伦敦", "RM3": "东伦敦", "RM4": "东伦敦",
-    "RM5": "东伦敦", "RM6": "东伦敦", "RM7": "东伦敦", "RM8": "东伦敦",
-    "RM9": "东伦敦", "RM10": "东伦敦", "RM11": "东伦敦", "RM12": "东伦敦",
-    "RM13": "东伦敦", "RM14": "东伦敦",
-    "DA1": "东伦敦", "DA2": "东伦敦", "DA5": "东伦敦", "DA6": "东伦敦",
-    "DA7": "东伦敦", "DA8": "东伦敦", "DA15": "东伦敦", "DA16": "东伦敦", "DA17": "东伦敦", "DA18": "东伦敦",
-    # 西伦敦 (West London)
-    "W2":  "西伦敦", "W3":  "西伦敦", "W4":  "西伦敦", "W5":  "西伦敦",
-    "W6":  "西伦敦", "W7":  "西伦敦", "W8":  "西伦敦", "W9":  "西伦敦",
-    "W10": "西伦敦", "W11": "西伦敦", "W12": "西伦敦", "W13": "西伦敦",
-    "W14": "西伦敦",
-    "TW1": "西伦敦", "TW2": "西伦敦", "TW3": "西伦敦", "TW4": "西伦敦",
-    "TW5": "西伦敦", "TW6": "西伦敦", "TW7": "西伦敦", "TW8": "西伦敦",
-    "TW9": "西伦敦", "TW10": "西伦敦", "TW11": "西伦敦", "TW12": "西伦敦",
-    "TW13": "西伦敦", "TW14": "西伦敦",
-    "UB1": "西伦敦", "UB2": "西伦敦", "UB3": "西伦敦", "UB4": "西伦敦",
-    "UB5": "西伦敦", "UB6": "西伦敦", "UB7": "西伦敦", "UB8": "西伦敦",
-    "UB9": "西伦敦", "UB10": "西伦敦", "UB11": "西伦敦",
-    "HA0": "西伦敦", "HA1": "西伦敦", "HA2": "西伦敦", "HA3": "西伦敦",
-    "HA4": "西伦敦", "HA5": "西伦敦", "HA6": "西伦敦", "HA7": "西伦敦",
-    "HA8": "西伦敦", "HA9": "西伦敦",
-    "SW6": "西伦敦", "SW10": "西伦敦",   # Fulham / Chelsea
-    # 北伦敦 (North London)
-    "N1":  "北伦敦", "N2":  "北伦敦", "N3":  "北伦敦", "N4":  "北伦敦",
-    "N5":  "北伦敦", "N6":  "北伦敦", "N7":  "北伦敦", "N8":  "北伦敦",
-    "N9":  "北伦敦", "N10": "北伦敦", "N11": "北伦敦", "N12": "北伦敦",
-    "N13": "北伦敦", "N14": "北伦敦", "N15": "北伦敦", "N16": "北伦敦",
-    "N17": "北伦敦", "N18": "北伦敦", "N19": "北伦敦", "N20": "北伦敦",
-    "N21": "北伦敦", "N22": "北伦敦",
-    "NW1": "北伦敦", "NW2": "北伦敦", "NW3": "北伦敦", "NW4": "北伦敦",
-    "NW5": "北伦敦", "NW6": "北伦敦", "NW7": "北伦敦", "NW8": "北伦敦",
-    "NW9": "北伦敦", "NW10": "北伦敦", "NW11": "北伦敦",
-    "EN1": "北伦敦", "EN2": "北伦敦", "EN3": "北伦敦", "EN4": "北伦敦",
-    "EN5": "北伦敦", "EN6": "北伦敦",
-    "WD6": "北伦敦", "WD17": "北伦敦", "WD18": "北伦敦", "WD19": "北伦敦", "WD23": "北伦敦", "WD24": "北伦敦", "WD25": "北伦敦",
-    # 南伦敦 (South London)
-    "SE2":  "南伦敦", "SE3":  "南伦敦", "SE4":  "南伦敦", "SE5":  "南伦敦",
-    "SE6":  "南伦敦", "SE7":  "南伦敦", "SE8":  "南伦敦", "SE9":  "南伦敦",
-    "SE10": "南伦敦", "SE11": "南伦敦", "SE12": "南伦敦", "SE13": "南伦敦",
-    "SE14": "南伦敦", "SE15": "南伦敦", "SE16": "南伦敦", "SE17": "南伦敦",
-    "SE18": "南伦敦", "SE19": "南伦敦", "SE20": "南伦敦", "SE21": "南伦敦",
-    "SE22": "南伦敦", "SE23": "南伦敦", "SE24": "南伦敦", "SE25": "南伦敦",
-    "SE26": "南伦敦", "SE27": "南伦敦", "SE28": "南伦敦",
-    "SW2":  "南伦敦", "SW3":  "南伦敦", "SW4":  "南伦敦", "SW5":  "南伦敦",
-    "SW7":  "南伦敦", "SW8":  "南伦敦", "SW9":  "南伦敦",
-    "SW11": "南伦敦", "SW12": "南伦敦", "SW13": "南伦敦", "SW14": "南伦敦",
-    "SW15": "南伦敦", "SW16": "南伦敦", "SW17": "南伦敦", "SW18": "南伦敦",
-    "SW19": "南伦敦", "SW20": "南伦敦",
-    "CR0": "南伦敦", "CR2": "南伦敦", "CR3": "南伦敦", "CR4": "南伦敦",
-    "CR5": "南伦敦", "CR6": "南伦敦", "CR7": "南伦敦", "CR8": "南伦敦",
-    "SM1": "南伦敦", "SM2": "南伦敦", "SM3": "南伦敦", "SM4": "南伦敦",
-    "SM5": "南伦敦", "SM6": "南伦敦", "SM7": "南伦敦",
-    "KT1": "南伦敦", "KT2": "南伦敦", "KT3": "南伦敦", "KT4": "南伦敦",
-    "KT5": "南伦敦", "KT6": "南伦敦", "KT7": "南伦敦", "KT8": "南伦敦",
-    "KT9": "南伦敦", "KT10": "南伦敦", "KT17": "南伦敦", "KT18": "南伦敦",
-    "BR1": "南伦敦", "BR2": "南伦敦", "BR3": "南伦敦", "BR4": "南伦敦",
-    "BR5": "南伦敦", "BR6": "南伦敦", "BR7": "南伦敦",
+    # 涓鸡鏁?(Central London) 鈥?EC / WC / W1 / SW1 / SE1 etc.
+    "EC1": "涓鸡鏁?, "EC2": "涓鸡鏁?, "EC3": "涓鸡鏁?, "EC4": "涓鸡鏁?,
+    "WC1": "涓鸡鏁?, "WC2": "涓鸡鏁?,
+    "W1":  "涓鸡鏁?, "W1A": "涓鸡鏁?, "W1B": "涓鸡鏁?, "W1C": "涓鸡鏁?,
+    "W1D": "涓鸡鏁?, "W1F": "涓鸡鏁?, "W1G": "涓鸡鏁?, "W1H": "涓鸡鏁?,
+    "W1J": "涓鸡鏁?, "W1K": "涓鸡鏁?, "W1S": "涓鸡鏁?, "W1T": "涓鸡鏁?,
+    "W1U": "涓鸡鏁?, "W1W": "涓鸡鏁?,
+    "SW1": "涓鸡鏁?, "SW1A": "涓鸡鏁?, "SW1E": "涓鸡鏁?, "SW1H": "涓鸡鏁?,
+    "SW1P": "涓鸡鏁?, "SW1V": "涓鸡鏁?, "SW1W": "涓鸡鏁?, "SW1X": "涓鸡鏁?,
+    "SW1Y": "涓鸡鏁?,
+    "SE1":  "涓鸡鏁?,
+    "N1C": "涓鸡鏁?,   # King's Cross area
+    # 涓滀鸡鏁?(East London)
+    "E1":  "涓滀鸡鏁?, "E1W": "涓滀鸡鏁?, "E2":  "涓滀鸡鏁?, "E3":  "涓滀鸡鏁?,
+    "E4":  "涓滀鸡鏁?, "E5":  "涓滀鸡鏁?, "E6":  "涓滀鸡鏁?, "E7":  "涓滀鸡鏁?,
+    "E8":  "涓滀鸡鏁?, "E9":  "涓滀鸡鏁?, "E10": "涓滀鸡鏁?, "E11": "涓滀鸡鏁?,
+    "E12": "涓滀鸡鏁?, "E13": "涓滀鸡鏁?, "E14": "涓滀鸡鏁?, "E15": "涓滀鸡鏁?,
+    "E16": "涓滀鸡鏁?, "E17": "涓滀鸡鏁?, "E18": "涓滀鸡鏁?, "E20": "涓滀鸡鏁?,
+    "IG1": "涓滀鸡鏁?, "IG2": "涓滀鸡鏁?, "IG3": "涓滀鸡鏁?, "IG4": "涓滀鸡鏁?,
+    "IG5": "涓滀鸡鏁?, "IG6": "涓滀鸡鏁?, "IG7": "涓滀鸡鏁?, "IG8": "涓滀鸡鏁?,
+    "IG11": "涓滀鸡鏁?,
+    "RM1": "涓滀鸡鏁?, "RM2": "涓滀鸡鏁?, "RM3": "涓滀鸡鏁?, "RM4": "涓滀鸡鏁?,
+    "RM5": "涓滀鸡鏁?, "RM6": "涓滀鸡鏁?, "RM7": "涓滀鸡鏁?, "RM8": "涓滀鸡鏁?,
+    "RM9": "涓滀鸡鏁?, "RM10": "涓滀鸡鏁?, "RM11": "涓滀鸡鏁?, "RM12": "涓滀鸡鏁?,
+    "RM13": "涓滀鸡鏁?, "RM14": "涓滀鸡鏁?,
+    "DA1": "涓滀鸡鏁?, "DA2": "涓滀鸡鏁?, "DA5": "涓滀鸡鏁?, "DA6": "涓滀鸡鏁?,
+    "DA7": "涓滀鸡鏁?, "DA8": "涓滀鸡鏁?, "DA15": "涓滀鸡鏁?, "DA16": "涓滀鸡鏁?, "DA17": "涓滀鸡鏁?, "DA18": "涓滀鸡鏁?,
+    # 瑗夸鸡鏁?(West London)
+    "W2":  "瑗夸鸡鏁?, "W3":  "瑗夸鸡鏁?, "W4":  "瑗夸鸡鏁?, "W5":  "瑗夸鸡鏁?,
+    "W6":  "瑗夸鸡鏁?, "W7":  "瑗夸鸡鏁?, "W8":  "瑗夸鸡鏁?, "W9":  "瑗夸鸡鏁?,
+    "W10": "瑗夸鸡鏁?, "W11": "瑗夸鸡鏁?, "W12": "瑗夸鸡鏁?, "W13": "瑗夸鸡鏁?,
+    "W14": "瑗夸鸡鏁?,
+    "TW1": "瑗夸鸡鏁?, "TW2": "瑗夸鸡鏁?, "TW3": "瑗夸鸡鏁?, "TW4": "瑗夸鸡鏁?,
+    "TW5": "瑗夸鸡鏁?, "TW6": "瑗夸鸡鏁?, "TW7": "瑗夸鸡鏁?, "TW8": "瑗夸鸡鏁?,
+    "TW9": "瑗夸鸡鏁?, "TW10": "瑗夸鸡鏁?, "TW11": "瑗夸鸡鏁?, "TW12": "瑗夸鸡鏁?,
+    "TW13": "瑗夸鸡鏁?, "TW14": "瑗夸鸡鏁?,
+    "UB1": "瑗夸鸡鏁?, "UB2": "瑗夸鸡鏁?, "UB3": "瑗夸鸡鏁?, "UB4": "瑗夸鸡鏁?,
+    "UB5": "瑗夸鸡鏁?, "UB6": "瑗夸鸡鏁?, "UB7": "瑗夸鸡鏁?, "UB8": "瑗夸鸡鏁?,
+    "UB9": "瑗夸鸡鏁?, "UB10": "瑗夸鸡鏁?, "UB11": "瑗夸鸡鏁?,
+    "HA0": "瑗夸鸡鏁?, "HA1": "瑗夸鸡鏁?, "HA2": "瑗夸鸡鏁?, "HA3": "瑗夸鸡鏁?,
+    "HA4": "瑗夸鸡鏁?, "HA5": "瑗夸鸡鏁?, "HA6": "瑗夸鸡鏁?, "HA7": "瑗夸鸡鏁?,
+    "HA8": "瑗夸鸡鏁?, "HA9": "瑗夸鸡鏁?,
+    "SW6": "瑗夸鸡鏁?, "SW10": "瑗夸鸡鏁?,   # Fulham / Chelsea
+    # 鍖椾鸡鏁?(North London)
+    "N1":  "鍖椾鸡鏁?, "N2":  "鍖椾鸡鏁?, "N3":  "鍖椾鸡鏁?, "N4":  "鍖椾鸡鏁?,
+    "N5":  "鍖椾鸡鏁?, "N6":  "鍖椾鸡鏁?, "N7":  "鍖椾鸡鏁?, "N8":  "鍖椾鸡鏁?,
+    "N9":  "鍖椾鸡鏁?, "N10": "鍖椾鸡鏁?, "N11": "鍖椾鸡鏁?, "N12": "鍖椾鸡鏁?,
+    "N13": "鍖椾鸡鏁?, "N14": "鍖椾鸡鏁?, "N15": "鍖椾鸡鏁?, "N16": "鍖椾鸡鏁?,
+    "N17": "鍖椾鸡鏁?, "N18": "鍖椾鸡鏁?, "N19": "鍖椾鸡鏁?, "N20": "鍖椾鸡鏁?,
+    "N21": "鍖椾鸡鏁?, "N22": "鍖椾鸡鏁?,
+    "NW1": "鍖椾鸡鏁?, "NW2": "鍖椾鸡鏁?, "NW3": "鍖椾鸡鏁?, "NW4": "鍖椾鸡鏁?,
+    "NW5": "鍖椾鸡鏁?, "NW6": "鍖椾鸡鏁?, "NW7": "鍖椾鸡鏁?, "NW8": "鍖椾鸡鏁?,
+    "NW9": "鍖椾鸡鏁?, "NW10": "鍖椾鸡鏁?, "NW11": "鍖椾鸡鏁?,
+    "EN1": "鍖椾鸡鏁?, "EN2": "鍖椾鸡鏁?, "EN3": "鍖椾鸡鏁?, "EN4": "鍖椾鸡鏁?,
+    "EN5": "鍖椾鸡鏁?, "EN6": "鍖椾鸡鏁?,
+    "WD6": "鍖椾鸡鏁?, "WD17": "鍖椾鸡鏁?, "WD18": "鍖椾鸡鏁?, "WD19": "鍖椾鸡鏁?, "WD23": "鍖椾鸡鏁?, "WD24": "鍖椾鸡鏁?, "WD25": "鍖椾鸡鏁?,
+    # 鍗椾鸡鏁?(South London)
+    "SE2":  "鍗椾鸡鏁?, "SE3":  "鍗椾鸡鏁?, "SE4":  "鍗椾鸡鏁?, "SE5":  "鍗椾鸡鏁?,
+    "SE6":  "鍗椾鸡鏁?, "SE7":  "鍗椾鸡鏁?, "SE8":  "鍗椾鸡鏁?, "SE9":  "鍗椾鸡鏁?,
+    "SE10": "鍗椾鸡鏁?, "SE11": "鍗椾鸡鏁?, "SE12": "鍗椾鸡鏁?, "SE13": "鍗椾鸡鏁?,
+    "SE14": "鍗椾鸡鏁?, "SE15": "鍗椾鸡鏁?, "SE16": "鍗椾鸡鏁?, "SE17": "鍗椾鸡鏁?,
+    "SE18": "鍗椾鸡鏁?, "SE19": "鍗椾鸡鏁?, "SE20": "鍗椾鸡鏁?, "SE21": "鍗椾鸡鏁?,
+    "SE22": "鍗椾鸡鏁?, "SE23": "鍗椾鸡鏁?, "SE24": "鍗椾鸡鏁?, "SE25": "鍗椾鸡鏁?,
+    "SE26": "鍗椾鸡鏁?, "SE27": "鍗椾鸡鏁?, "SE28": "鍗椾鸡鏁?,
+    "SW2":  "鍗椾鸡鏁?, "SW3":  "鍗椾鸡鏁?, "SW4":  "鍗椾鸡鏁?, "SW5":  "鍗椾鸡鏁?,
+    "SW7":  "鍗椾鸡鏁?, "SW8":  "鍗椾鸡鏁?, "SW9":  "鍗椾鸡鏁?,
+    "SW11": "鍗椾鸡鏁?, "SW12": "鍗椾鸡鏁?, "SW13": "鍗椾鸡鏁?, "SW14": "鍗椾鸡鏁?,
+    "SW15": "鍗椾鸡鏁?, "SW16": "鍗椾鸡鏁?, "SW17": "鍗椾鸡鏁?, "SW18": "鍗椾鸡鏁?,
+    "SW19": "鍗椾鸡鏁?, "SW20": "鍗椾鸡鏁?,
+    "CR0": "鍗椾鸡鏁?, "CR2": "鍗椾鸡鏁?, "CR3": "鍗椾鸡鏁?, "CR4": "鍗椾鸡鏁?,
+    "CR5": "鍗椾鸡鏁?, "CR6": "鍗椾鸡鏁?, "CR7": "鍗椾鸡鏁?, "CR8": "鍗椾鸡鏁?,
+    "SM1": "鍗椾鸡鏁?, "SM2": "鍗椾鸡鏁?, "SM3": "鍗椾鸡鏁?, "SM4": "鍗椾鸡鏁?,
+    "SM5": "鍗椾鸡鏁?, "SM6": "鍗椾鸡鏁?, "SM7": "鍗椾鸡鏁?,
+    "KT1": "鍗椾鸡鏁?, "KT2": "鍗椾鸡鏁?, "KT3": "鍗椾鸡鏁?, "KT4": "鍗椾鸡鏁?,
+    "KT5": "鍗椾鸡鏁?, "KT6": "鍗椾鸡鏁?, "KT7": "鍗椾鸡鏁?, "KT8": "鍗椾鸡鏁?,
+    "KT9": "鍗椾鸡鏁?, "KT10": "鍗椾鸡鏁?, "KT17": "鍗椾鸡鏁?, "KT18": "鍗椾鸡鏁?,
+    "BR1": "鍗椾鸡鏁?, "BR2": "鍗椾鸡鏁?, "BR3": "鍗椾鸡鏁?, "BR4": "鍗椾鸡鏁?,
+    "BR5": "鍗椾鸡鏁?, "BR6": "鍗椾鸡鏁?, "BR7": "鍗椾鸡鏁?,
 }
 
 def infer_london_region(postcode: str) -> str:
-    """根据英国邮编智能判断伦敦区域，无需任何 API Key。"""
+    """鏍规嵁鑻卞浗閭紪鏅鸿兘鍒ゆ柇浼︽暒鍖哄煙锛屾棤闇€浠讳綍 API Key銆?""
     if not postcode:
-        return "中伦敦"
+        return "涓鸡鏁?
     pc = postcode.upper().strip()
-    # 提取 outward code — 邮编前半部分 (e.g. "SW1A" from "SW1A 1AA")
+    # 鎻愬彇 outward code 鈥?閭紪鍓嶅崐閮ㄥ垎 (e.g. "SW1A" from "SW1A 1AA")
     if " " in pc:
         outward: str = pc.split()[0]
     else:
         m = re.match(r'^[A-Z]{1,2}[0-9]{1,2}[A-Z]?', pc)
         outward = m.group() if m else pc[:4]
-    # 尝试从长到短匹配 (e.g. SW1A -> SW1 -> SW)
+    # 灏濊瘯浠庨暱鍒扮煭鍖归厤 (e.g. SW1A -> SW1 -> SW)
     for length in [4, 3, 2]:
         candidate: str = outward[:length]
         if candidate in _POSTCODE_REGION:
             return _POSTCODE_REGION[candidate]
-    return "中伦敦"  # 默认回退
+    return "涓鸡鏁?  # 榛樿鍥為€€
 
-# --- 3. AI 文案解析 ---
+# --- 3. AI 鏂囨瑙ｆ瀽 ---
 def call_smart_ai(text):
-    if not text: return "✓ 请输入描述"
+    if not text: return "鉁?璇疯緭鍏ユ弿杩?
     try:
         api_key = st.secrets["OPENAI_API_KEY"]
-        prompt = "作为一名资深伦敦房产专家，请将这段英文房源描述转化为极具吸引力的小红书爆款文案。要求：1. 标题要吸睛（使用Emoji）；2. 核心卖点提炼清晰（地理位置、交通、设施等）；3. 语言生动活泼，多使用小红书常用Emoji；4. 绝对不要包含微信号或任何扫码加微信等容易被封号的词汇，可以写'欢迎私信或留言咨询'；5. 结尾加上相关的热门标签（如 #伦敦租房 #伦敦公寓 等）。"
+        prompt = "浣滀负涓€鍚嶈祫娣变鸡鏁︽埧浜т笓瀹讹紝璇峰皢杩欐鑻辨枃鎴挎簮鎻忚堪杞寲涓烘瀬鍏峰惛寮曞姏鐨勫皬绾功鐖嗘鏂囨銆傝姹傦細1. 鏍囬瑕佸惛鐫涳紙浣跨敤Emoji锛夛紱2. 鏍稿績鍗栫偣鎻愮偧娓呮櫚锛堝湴鐞嗕綅缃€佷氦閫氥€佽鏂界瓑锛夛紱3. 璇█鐢熷姩娲绘臣锛屽浣跨敤灏忕孩涔﹀父鐢‥moji锛?. 缁濆涓嶈鍖呭惈寰俊鍙锋垨浠讳綍鎵爜鍔犲井淇＄瓑瀹规槗琚皝鍙风殑璇嶆眹锛屽彲浠ュ啓'娆㈣繋绉佷俊鎴栫暀瑷€鍜ㄨ'锛?. 缁撳熬鍔犱笂鐩稿叧鐨勭儹闂ㄦ爣绛撅紙濡?#浼︽暒绉熸埧 #浼︽暒鍏瘬 绛夛級銆?
         r = requests.post("https://api.deepseek.com/chat/completions",
             json={"model": "deepseek-chat", "messages": [{"role": "system", "content": prompt}, {"role": "user", "content": text}]},
             headers={"Authorization": f"Bearer {api_key}"}, timeout=25)
         return r.json()['choices'][0]['message']['content'].replace("**", "")
-    except: return "✓ 解析失败，请手动修改"
+    except: return "鉁?瑙ｆ瀽澶辫触锛岃鎵嬪姩淇敼"
 
 def scrape_rightmove(url):
     headers = {
@@ -257,32 +230,7 @@ def scrape_rightmove(url):
     }
     try:
         if not url or "rightmove.co.uk" not in url:
-            return None
-
-
-headers = raw_rows[0]
-        data_rows = raw_rows[1:]
-        clean_headers = []
-        seen = {}
-        for i, h in enumerate(headers):
-            h = str(h).strip()
-            if not h: h = f"Unnamed_{i}"
-            if h in seen:
-                seen[h] += 1
-                clean_headers.append(f"{h}_{seen[h]}")
-            else:
-                seen[h] = 0
-                clean_headers.append(h)
-        records = []
-        for row in data_rows:
-            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
-            records.append(dict(zip(clean_headers, row)))
-        return records
-    except Exception as e:
-        import streamlit as st
-        st.error(f"⚠️ Read Error: {e}")
-        return []
-, "无效的 Rightmove 链接"
+            return None, "鏃犳晥鐨?Rightmove 閾炬帴"
         res = requests.get(url, headers=headers, timeout=15)
         res.raise_for_status()
         html = res.text
@@ -292,32 +240,7 @@ headers = raw_rows[0]
                 data, _ = json.JSONDecoder().raw_decode(page_model_raw)
                 p_data = data.get('propertyData', {})
             except json.JSONDecodeError as e:
-                return None
-
-
-headers = raw_rows[0]
-        data_rows = raw_rows[1:]
-        clean_headers = []
-        seen = {}
-        for i, h in enumerate(headers):
-            h = str(h).strip()
-            if not h: h = f"Unnamed_{i}"
-            if h in seen:
-                seen[h] += 1
-                clean_headers.append(f"{h}_{seen[h]}")
-            else:
-                seen[h] = 0
-                clean_headers.append(h)
-        records = []
-        for row in data_rows:
-            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
-            records.append(dict(zip(clean_headers, row)))
-        return records
-    except Exception as e:
-        import streamlit as st
-        st.error(f"⚠️ Read Error: {e}")
-        return []
-, f"JSON解析失败: {e}"
+                return None, f"JSON瑙ｆ瀽澶辫触: {e}"
             
             if p_data:
                 raw_title = p_data.get('text', {}).get('pageTitle', '')
@@ -332,8 +255,8 @@ headers = raw_rows[0]
                 desc = re.sub(r'<[^>]+>', '', desc_html).strip()
                 bedrooms = p_data.get('bedrooms', 0)
                 if bedrooms == 0: rooms_str = "Studio"
-                elif bedrooms >= 4: rooms_str = "4房+"
-                else: rooms_str = f"{bedrooms}房"
+                elif bedrooms >= 4: rooms_str = "4鎴?"
+                else: rooms_str = f"{bedrooms}鎴?
                 img_data: Any = p_data.get('images', [])
                 images: List[str] = [str(img.get('url')) for img in img_data if isinstance(img, dict) and img.get('url')] if isinstance(img_data, list) else []
                 
@@ -346,7 +269,7 @@ headers = raw_rows[0]
                 elif floorplans:
                     final_images.append(floorplans[0])
                 
-                # 提取最近的3个地铁/火车站和具体经纬度
+                # 鎻愬彇鏈€杩戠殑3涓湴閾?鐏溅绔欏拰鍏蜂綋缁忕含搴?
                 stations_data = []
                 if 'location' in p_data and 'stations' in p_data['location']:
                     stations_data = p_data['location']['stations']
@@ -377,13 +300,13 @@ headers = raw_rows[0]
                     lat = p_data['location'].get('latitude', '')
                     lng = p_data['location'].get('longitude', '')
                 
-                # 智能分区：从房源地址/邮编自动判断伦敦区域
+                # 鏅鸿兘鍒嗗尯锛氫粠鎴挎簮鍦板潃/閭紪鑷姩鍒ゆ柇浼︽暒鍖哄煙
                 address_info: Any = p_data.get('address', {})
                 postcode: str = ""
                 if isinstance(address_info, dict):
                     postcode = str(address_info.get('outcode', '') or address_info.get('postcode', '') or '')
                 if not postcode:
-                    # 从标题中尝试提取邮编
+                    # 浠庢爣棰樹腑灏濊瘯鎻愬彇閭紪
                     pc_match = re.search(r'\b([A-Z]{1,2}[0-9]{1,2}[A-Z]?\s?[0-9][A-Z]{2})\b', title.upper())
                     if pc_match:
                         postcode = pc_match.group(1)
@@ -397,64 +320,14 @@ headers = raw_rows[0]
                     'lat': lat,
                     'lng': lng
                 }, None
-        return None
-
-
-headers = raw_rows[0]
-        data_rows = raw_rows[1:]
-        clean_headers = []
-        seen = {}
-        for i, h in enumerate(headers):
-            h = str(h).strip()
-            if not h: h = f"Unnamed_{i}"
-            if h in seen:
-                seen[h] += 1
-                clean_headers.append(f"{h}_{seen[h]}")
-            else:
-                seen[h] = 0
-                clean_headers.append(h)
-        records = []
-        for row in data_rows:
-            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
-            records.append(dict(zip(clean_headers, row)))
-        return records
+        return None, "鏃犳硶瑙ｆ瀽鏁版嵁锛岃妫€鏌ラ摼鎺ユ槸鍚︿负鎴挎簮椤?
     except Exception as e:
-        import streamlit as st
-        st.error(f"⚠️ Read Error: {e}")
-        return []
-, "无法解析数据，请检查链接是否为房源页"
-    except Exception as e:
-        return None
+        return None, f"鎶撳彇澶辫触: {e}"
 
-
-headers = raw_rows[0]
-        data_rows = raw_rows[1:]
-        clean_headers = []
-        seen = {}
-        for i, h in enumerate(headers):
-            h = str(h).strip()
-            if not h: h = f"Unnamed_{i}"
-            if h in seen:
-                seen[h] += 1
-                clean_headers.append(f"{h}_{seen[h]}")
-            else:
-                seen[h] = 0
-                clean_headers.append(h)
-        records = []
-        for row in data_rows:
-            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
-            records.append(dict(zip(clean_headers, row)))
-        return records
-    except Exception as e:
-        import streamlit as st
-        st.error(f"⚠️ Read Error: {e}")
-        return []
-, f"抓取失败: {e}"
-
-# --- 4. 核心：海报引擎 (仅修改 display_text 拼接) ---
-def create_poster(files, title, price, rooms, region="伦敦"):
+# --- 4. 鏍稿績锛氭捣鎶ュ紩鎿?(浠呬慨鏀?display_text 鎷兼帴) ---
+def create_poster(files, title, price, rooms, region="浼︽暒"):
     try:
-        # 1200x2350 高清加长画布 (8宫格)
+        # 1200x2350 楂樻竻鍔犻暱鐢诲竷 (8瀹牸)
         canvas = Image.new('RGB', (1200, 2350), (255, 255, 255))
         draw = ImageDraw.Draw(canvas)
         
@@ -463,81 +336,56 @@ def create_poster(files, title, price, rooms, region="伦敦"):
             font_title = ImageFont.truetype("simhei.ttf", 65)
             font_price = ImageFont.truetype("simhei.ttf", 100)
             font_footer = ImageFont.truetype("simhei.ttf", 38)
-            font_wm = ImageFont.truetype("simhei.ttf", 130) # 水印字体
+            font_wm = ImageFont.truetype("simhei.ttf", 130) # 姘村嵃瀛椾綋
         except:
             font_banner = font_title = font_price = font_footer = font_wm = ImageFont.load_default()
 
-        # A. 顶部横幅 Banner
+        # A. 椤堕儴妯箙 Banner
         draw.rectangle([(0, 0), (1200, 130)], fill=(26, 26, 26))
         
-        # 居中 Hao Harbour
+        # 灞呬腑 Hao Harbour
         banner_text = "HAO HARBOUR"
         left_padding = 420
         # draw.text_length
         draw.text((left_padding, 35), banner_text, font=font_banner, fill=(191, 160, 100))
 
-        # B. 8 宫格拼接 (2列 x 4行)
+        # B. 8 瀹牸鎷兼帴 (2鍒?x 4琛?
         for i, f in enumerate(files[:8]):
             img = Image.open(f).convert('RGB').resize((575, 430), Image.Resampling.LANCZOS)
             x = 20 + (i % 2) * 585
             y = 150 + (i // 2) * 440
             canvas.paste(img, (x, y))
 
-        # C. 双居中加深水印 (一上一下)
+        # C. 鍙屽眳涓姞娣辨按鍗?(涓€涓婁竴涓?
         wm_layer = Image.new('RGBA', canvas.size, (0, 0, 0, 0))
         wm_draw = ImageDraw.Draw(wm_layer)
         wm_color = (255, 255, 255, 140) 
         
-        # 水印位置顺应更长的画布
+        # 姘村嵃浣嶇疆椤哄簲鏇撮暱鐨勭敾甯?
         wm_draw.text((220, 600), "Hao Harbour", font=font_wm, fill=wm_color)
         wm_draw.text((220, 1500), "Hao Harbour", font=font_wm, fill=wm_color)
         
         rotated_wm = wm_layer.rotate(30, expand=False)
         canvas.paste(rotated_wm, (0, 0), rotated_wm)
 
-        # D. 底部专业信息区 (Y = 1950 起始)
+        # D. 搴曢儴涓撲笟淇℃伅鍖?(Y = 1950 璧峰)
         draw.text((40, 1950), f"{title}", font=font_title, fill=(40, 40, 40))
         draw.text((40, 2030), f"Location: {region}", font=font_footer, fill=(100, 100, 100))
         
         draw.text((40, 2100), f"GBP {price} / PCM", font=font_price, fill=(191, 160, 100))
-        # 户型标签：用圆点分隔，避免竖线符号渲染为灰色线条
-        draw.text((40, 2225), f"•  {rooms}", font=font_footer, fill=(120, 120, 120))
+        # 鎴峰瀷鏍囩锛氱敤鍦嗙偣鍒嗛殧锛岄伩鍏嶇珫绾跨鍙锋覆鏌撲负鐏拌壊绾挎潯
+        draw.text((40, 2225), f"鈥? {rooms}", font=font_footer, fill=(120, 120, 120))
         
-        # 装饰金色线条
+        # 瑁呴グ閲戣壊绾挎潯
         draw.line([(40, 2260), (1160, 2260)], fill=(200, 200, 200), width=3)
         draw.text((40, 2280), "Hao Harbour Exclusive London Property", font=font_footer, fill=(180, 160, 100))
         
         return canvas
     except Exception as e:
-        st.error(f"海报生成出错: {e}")
+        st.error(f"娴锋姤鐢熸垚鍑洪敊: {e}")
         return None
-
-
-headers = raw_rows[0]
-        data_rows = raw_rows[1:]
-        clean_headers = []
-        seen = {}
-        for i, h in enumerate(headers):
-            h = str(h).strip()
-            if not h: h = f"Unnamed_{i}"
-            if h in seen:
-                seen[h] += 1
-                clean_headers.append(f"{h}_{seen[h]}")
-            else:
-                seen[h] = 0
-                clean_headers.append(h)
-        records = []
-        for row in data_rows:
-            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
-            records.append(dict(zip(clean_headers, row)))
-        return records
-    except Exception as e:
-        import streamlit as st
-        st.error(f"⚠️ Read Error: {e}")
-        return []
-
-# --- 4b. 微信方版海报 1080x1080 ---
-def create_wechat_poster(files, title, price, rooms, region="伦敦"):
+# --- 4b. 寰俊鏂圭増娴锋姤 1080x1080 ---
+def create_wechat_poster(files, title, price, rooms, region="浼︽暒"):
     try:
         canvas = Image.new('RGB', (1080, 1080), (255, 255, 255))
         draw = ImageDraw.Draw(canvas)
@@ -552,56 +400,31 @@ def create_wechat_poster(files, title, price, rooms, region="伦敦"):
         # Banner
         draw.rectangle([(0, 0), (1080, 100)], fill=(26, 26, 26))
         draw.text((330, 26), "HAO HARBOUR", font=fb, fill=(191, 160, 100))
-        # 2x2 图片网格
+        # 2x2 鍥剧墖缃戞牸
         for i, f in enumerate(files[:4]):
             img = Image.open(f).convert('RGB').resize((520, 260), Image.Resampling.LANCZOS)
             x = 20 + (i % 2) * 540
             y = 115 + (i // 2) * 270
             canvas.paste(img, (x, y))
-        # 水印
+        # 姘村嵃
         wm = Image.new('RGBA', canvas.size, (0,0,0,0))
         ImageDraw.Draw(wm).text((100, 320), "Hao Harbour", font=fw, fill=(255,255,255,120))
         wm = wm.rotate(20, expand=False)
         canvas.paste(wm, (0, 0), wm)
-        # 信息区
+        # 淇℃伅鍖?
         draw.text((30, 680), title[:28], font=ft, fill=(40,40,40))
         draw.text((30, 735), f"Location: {region}", font=ff, fill=(100,100,100))
         draw.text((30, 780), f"GBP {price} / PCM", font=fp, fill=(191,160,100))
-        draw.text((30, 870), f"• {rooms}", font=ff, fill=(120,120,120))
+        draw.text((30, 870), f"鈥?{rooms}", font=ff, fill=(120,120,120))
         draw.line([(30, 910), (1050, 910)], fill=(200,200,200), width=2)
         draw.text((30, 925), "Hao Harbour Exclusive London Property", font=ff, fill=(180,160,100))
         return canvas
     except Exception as e:
-        st.error(f"微信海报生成出错: {e}")
+        st.error(f"寰俊娴锋姤鐢熸垚鍑洪敊: {e}")
         return None
 
-
-headers = raw_rows[0]
-        data_rows = raw_rows[1:]
-        clean_headers = []
-        seen = {}
-        for i, h in enumerate(headers):
-            h = str(h).strip()
-            if not h: h = f"Unnamed_{i}"
-            if h in seen:
-                seen[h] += 1
-                clean_headers.append(f"{h}_{seen[h]}")
-            else:
-                seen[h] = 0
-                clean_headers.append(h)
-        records = []
-        for row in data_rows:
-            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
-            records.append(dict(zip(clean_headers, row)))
-        return records
-    except Exception as e:
-        import streamlit as st
-        st.error(f"⚠️ Read Error: {e}")
-        return []
-
-
-# --- 4c. 抖音/Story 竖版海报 1080x1920 ---
-def create_story_poster(files, title, price, rooms, region="伦敦"):
+# --- 4c. 鎶栭煶/Story 绔栫増娴锋姤 1080x1920 ---
+def create_story_poster(files, title, price, rooms, region="浼︽暒"):
     try:
         canvas = Image.new('RGB', (1080, 1920), (255, 255, 255))
         draw = ImageDraw.Draw(canvas)
@@ -616,69 +439,44 @@ def create_story_poster(files, title, price, rooms, region="伦敦"):
         # Banner
         draw.rectangle([(0, 0), (1080, 115)], fill=(26, 26, 26))
         draw.text((330, 28), "HAO HARBOUR", font=fb, fill=(191, 160, 100))
-        # 3x2 图片网格
+        # 3x2 鍥剧墖缃戞牸
         for i, f in enumerate(files[:6]):
             img = Image.open(f).convert('RGB').resize((520, 370), Image.Resampling.LANCZOS)
             x = 20 + (i % 2) * 540
             y = 130 + (i // 2) * 380
             canvas.paste(img, (x, y))
-        # 水印
+        # 姘村嵃
         wm = Image.new('RGBA', canvas.size, (0,0,0,0))
         wd = ImageDraw.Draw(wm)
         wd.text((150, 500), "Hao Harbour", font=fw, fill=(255,255,255,120))
         wd.text((150, 1200), "Hao Harbour", font=fw, fill=(255,255,255,120))
         wm = wm.rotate(25, expand=False)
         canvas.paste(wm, (0,0), wm)
-        # 信息区
+        # 淇℃伅鍖?
         draw.text((40, 1278), title[:30], font=ft, fill=(40,40,40))
         draw.text((40, 1345), f"Location: {region}", font=ff, fill=(100,100,100))
         draw.text((40, 1400), f"GBP {price} / PCM", font=fp, fill=(191,160,100))
-        draw.text((40, 1510), f"• {rooms}", font=ff, fill=(120,120,120))
+        draw.text((40, 1510), f"鈥?{rooms}", font=ff, fill=(120,120,120))
         draw.line([(40, 1560), (1040, 1560)], fill=(200,200,200), width=2)
         draw.text((40, 1580), "Hao Harbour Exclusive London Property", font=ff, fill=(180,160,100))
-        # 底部装饰条
+        # 搴曢儴瑁呴グ鏉?
         draw.rectangle([(0, 1860), (1080, 1920)], fill=(26,26,26))
         draw.text((340, 1874), "@HAO HARBOUR", font=ff, fill=(191,160,100))
         return canvas
     except Exception as e:
-        st.error(f"抖音海报生成出错: {e}")
+        st.error(f"鎶栭煶娴锋姤鐢熸垚鍑洪敊: {e}")
         return None
 
-
-headers = raw_rows[0]
-        data_rows = raw_rows[1:]
-        clean_headers = []
-        seen = {}
-        for i, h in enumerate(headers):
-            h = str(h).strip()
-            if not h: h = f"Unnamed_{i}"
-            if h in seen:
-                seen[h] += 1
-                clean_headers.append(f"{h}_{seen[h]}")
-            else:
-                seen[h] = 0
-                clean_headers.append(h)
-        records = []
-        for row in data_rows:
-            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
-            records.append(dict(zip(clean_headers, row)))
-        return records
-    except Exception as e:
-        import streamlit as st
-        st.error(f"⚠️ Read Error: {e}")
-        return []
-
-
-# --- 4d. 抖音口播脚本生成 ---
+# --- 4d. 鎶栭煶鍙ｆ挱鑴氭湰鐢熸垚 ---
 def gen_douyin_script(title: str, price: int, rooms: str, region: str, desc: str) -> str:
     try:
         api_key = st.secrets["OPENAI_API_KEY"]
         prompt = (
-            "你是一个抖音/小红书房产博主，请根据以下伦敦房源信息，写一段15秒口播文案。"
-            "要求：①开头3秒必须有钩子（惊喜/痛点/数字）②语言口语化、有节奏感 "
-            "③结尾引导点赞收藏 ④全文不超过120字 ⑤不要用微信/扫码等违禁词。"
+            "浣犳槸涓€涓姈闊?灏忕孩涔︽埧浜у崥涓伙紝璇锋牴鎹互涓嬩鸡鏁︽埧婧愪俊鎭紝鍐欎竴娈?5绉掑彛鎾枃妗堛€?
+            "瑕佹眰锛氣憼寮€澶?绉掑繀椤绘湁閽╁瓙锛堟儕鍠?鐥涚偣/鏁板瓧锛夆憽璇█鍙ｈ鍖栥€佹湁鑺傚鎰?"
+            "鈶㈢粨灏惧紩瀵肩偣璧炴敹钘?鈶ｅ叏鏂囦笉瓒呰繃120瀛?鈶や笉瑕佺敤寰俊/鎵爜绛夎繚绂佽瘝銆?
         )
-        content = f"房源：{title}，位于{region}，{rooms}，月租£{price}。描述：{desc[:300]}"
+        content = f"鎴挎簮锛歿title}锛屼綅浜巤region}锛寋rooms}锛屾湀绉熉price}銆傛弿杩帮細{desc[:300]}"
         r = requests.post("https://api.deepseek.com/chat/completions",
             json={"model": "deepseek-chat", "messages": [
                 {"role": "system", "content": prompt},
@@ -687,45 +485,45 @@ def gen_douyin_script(title: str, price: int, rooms: str, region: str, desc: str
             headers={"Authorization": f"Bearer {api_key}"}, timeout=20)
         return r.json()['choices'][0]['message']['content'].strip()
     except:
-        return f"🎬 【{region}·{rooms}】仅£{price}/月！\n{title}，地段好、装修新，稀缺好房等你！\n👉 点赞收藏，私信了解详情！"
+        return f"馃幀 銆恵region}路{rooms}銆戜粎拢{price}/鏈堬紒\n{title}锛屽湴娈靛ソ銆佽淇柊锛岀█缂哄ソ鎴跨瓑浣狅紒\n馃憠 鐐硅禐鏀惰棌锛岀淇′簡瑙ｈ鎯咃紒"
 
 
-# --- 4e. 专业带看报告生成器 (Text & PDF) ---
+# --- 4e. 涓撲笟甯︾湅鎶ュ憡鐢熸垚鍣?(Text & PDF) ---
 def gen_pro_viewing_summary(client_name: str, date: str, address: str, facing: str, items: Dict[str, Dict[str, int]], remarks: Dict[str, str]) -> str:
-    """生成带 Emoji 和颜色区分的结构化文案"""
+    """鐢熸垚甯?Emoji 鍜岄鑹插尯鍒嗙殑缁撴瀯鍖栨枃妗?""
     summary = [
-        f"━━━━━━━━━━━━━━━━━━━━━━━━",
-        f"🏠 专业带看报告 | Viewing Report",
-        f"━━━━━━━━━━━━━━━━━━━━━━━━",
-        f"👤 客户：{client_name}",
-        f"📅 日期：{date}",
-        f"📍 地址：{address}",
-        f"🧭 朝向：{facing}",
-        f"📞 联系：Wechat {VIEWING_CONTACT_WECHAT} | {VIEWING_CONTACT_PHONE}",
-        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣",
+        f"馃彔 涓撲笟甯︾湅鎶ュ憡 | Viewing Report",
+        f"鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣",
+        f"馃懁 瀹㈡埛锛歿client_name}",
+        f"馃搮 鏃ユ湡锛歿date}",
+        f"馃搷 鍦板潃锛歿address}",
+        f"馃Л 鏈濆悜锛歿facing}",
+        f"馃摓 鑱旂郴锛歐echat {VIEWING_CONTACT_WECHAT} | {VIEWING_CONTACT_PHONE}",
+        f"鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣\n"
     ]
     
     for section, section_items in items.items():
-        summary.append(f"【{section}】")
+        summary.append(f"銆恵section}銆?)
         for item, score in section_items.items():
-            # 评分 4-5 为绿色，3 为黄色，1-2 为红色
-            emoji = "🟢" if score >= 4 else ("🟡" if score == 3 else "🔴")
-            stars = "⭐" * score
+            # 璇勫垎 4-5 涓虹豢鑹诧紝3 涓洪粍鑹诧紝1-2 涓虹孩鑹?
+            emoji = "馃煝" if score >= 4 else ("馃煛" if score == 3 else "馃敶")
+            stars = "猸? * score
             summary.append(f" {emoji} {item}: {stars}")
         if remarks.get(section):
-            summary.append(f" 📝 备注: {remarks[section]}")
+            summary.append(f" 馃摑 澶囨敞: {remarks[section]}")
         summary.append("")
 
     if remarks.get('General'):
-        summary.append(f"💬 总体评价: {remarks['General']}\n")
+        summary.append(f"馃挰 鎬讳綋璇勪环: {remarks['General']}\n")
     
-    summary.append("⚠️ 免责声明:")
+    summary.append("鈿狅笍 鍏嶈矗澹版槑:")
     summary.append(VIEWING_DISCLAIMER)
-    summary.append("━━━━━━━━━━━━━━━━━━━━━━━━")
+    summary.append("鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣")
     return "\n".join(summary)
 
 def create_viewing_report_pdf(client_name, date_str, address, facing, items_data, remarks, photos):
-    """使用 PIL 生成长图并保存为 PDF"""
+    """浣跨敤 PIL 鐢熸垚闀垮浘骞朵繚瀛樹负 PDF"""
     try:
         f_header = ImageFont.truetype("simhei.ttf", 40)
         f_body = ImageFont.truetype("simhei.ttf", 32)
@@ -753,8 +551,8 @@ def create_viewing_report_pdf(client_name, date_str, address, facing, items_data
             y += font.size + 15
         return y
 
-    # 预估高度：基础文本 + 评分项 + 备注自动换行预估 + 照片
-    # 每个备注预估占用额外 100 像素
+    # 棰勪及楂樺害锛氬熀纭€鏂囨湰 + 璇勫垎椤?+ 澶囨敞鑷姩鎹㈣棰勪及 + 鐓х墖
+    # 姣忎釜澶囨敞棰勪及鍗犵敤棰濆 100 鍍忕礌
     total_items = sum(len(v) for v in items_data.values())
     photo_rows = (len(photos) + 1) // 2
     estimated_height = 1000 + (total_items * 65) + (len(items_data) * 200) + (photo_rows * 460) + 600
@@ -762,49 +560,49 @@ def create_viewing_report_pdf(client_name, date_str, address, facing, items_data
     canvas = Image.new('RGB', (1200, int(estimated_height)), (255, 255, 255))
     draw = ImageDraw.Draw(canvas)
     
-    # 1. 页眉 Banner
+    # 1. 椤电湁 Banner
     draw.rectangle([(0, 0), (1200, 150)], fill=(26, 26, 26))
-    draw.text((60, 45), "HAO HARBOUR - 专业带看报告", font=f_banner, fill=(191, 160, 100))
+    draw.text((60, 45), "HAO HARBOUR - 涓撲笟甯︾湅鎶ュ憡", font=f_banner, fill=(191, 160, 100))
     
-    # 2. 基本信息
+    # 2. 鍩烘湰淇℃伅
     y = 190
-    draw.text((60, y), f"客户姓名: {client_name}", font=f_body, fill=(50, 50, 50))
-    draw.text((600, y), f"看房日期: {date_str}", font=f_body, fill=(50, 50, 50))
+    draw.text((60, y), f"瀹㈡埛濮撳悕: {client_name}", font=f_body, fill=(50, 50, 50))
+    draw.text((600, y), f"鐪嬫埧鏃ユ湡: {date_str}", font=f_body, fill=(50, 50, 50))
     y += 65
-    draw.text((60, y), f"房屋地址: {address}", font=f_body, fill=(50, 50, 50))
+    draw.text((60, y), f"鎴垮眿鍦板潃: {address}", font=f_body, fill=(50, 50, 50))
     y += 65
-    draw.text((60, y), f"房屋朝向: {facing}", font=f_body, fill=(50, 50, 50))
+    draw.text((60, y), f"鎴垮眿鏈濆悜: {facing}", font=f_body, fill=(50, 50, 50))
     y += 65
-    draw.text((60, y), f"联系方式: WeChat {VIEWING_CONTACT_WECHAT} | {VIEWING_CONTACT_PHONE}", font=f_body, fill=(191, 160, 100))
+    draw.text((60, y), f"鑱旂郴鏂瑰紡: WeChat {VIEWING_CONTACT_WECHAT} | {VIEWING_CONTACT_PHONE}", font=f_body, fill=(191, 160, 100))
     
     y += 50
     draw.line([(60, y), (1140, y)], fill=(200, 200, 200), width=2)
     y += 50
 
-    # 3. 核心评估板块
+    # 3. 鏍稿績璇勪及鏉垮潡
     for section, s_items in items_data.items():
-        draw.text((60, y), f"【{section}】", font=f_header, fill=(191, 160, 100))
+        draw.text((60, y), f"銆恵section}銆?, font=f_header, fill=(191, 160, 100))
         y += 80
         for item, score in s_items.items():
             star_color = (34, 139, 34) if score >= 4 else ((255, 140, 0) if score == 3 else (220, 20, 60))
             draw.text((80, y), item, font=f_body, fill=(80, 80, 80))
-            draw.text((630, y), "★" * score + "☆" * (5 - score), font=f_star, fill=star_color)
+            draw.text((630, y), "鈽? * score + "鈽? * (5 - score), font=f_star, fill=star_color)
             y += 65
         
         if remarks.get(section):
-            y = draw_wrapped_text(draw, f"备注: {remarks[section]}", 80, y, f_body, 1040, fill=(110, 110, 110))
+            y = draw_wrapped_text(draw, f"澶囨敞: {remarks[section]}", 80, y, f_body, 1040, fill=(110, 110, 110))
         y += 45
 
-    # 4. 总体备注
+    # 4. 鎬讳綋澶囨敞
     if remarks.get('General'):
-        draw.text((60, y), "总体备注:", font=f_header, fill=(50, 50, 50))
+        draw.text((60, y), "鎬讳綋澶囨敞:", font=f_header, fill=(50, 50, 50))
         y += 70
         y = draw_wrapped_text(draw, remarks['General'], 80, y, f_body, 1040, fill=(80, 80, 80))
         y += 60
 
-    # 5. 照片展示
+    # 5. 鐓х墖灞曠ず
     if photos:
-        draw.text((60, y), "现场照片:", font=f_header, fill=(50, 50, 50))
+        draw.text((60, y), "鐜板満鐓х墖:", font=f_header, fill=(50, 50, 50))
         y += 80
         for i, photo_data in enumerate(photos):
             try:
@@ -816,10 +614,10 @@ def create_viewing_report_pdf(client_name, date_str, address, facing, items_data
             except: pass
         y += photo_rows * 460 + 80
 
-    # 6. 斜向加深水印 (与房子海报一致)
+    # 6. 鏂滃悜鍔犳繁姘村嵃 (涓庢埧瀛愭捣鎶ヤ竴鑷?
     wm_layer = Image.new('RGBA', canvas.size, (0, 0, 0, 0))
     wm_draw = ImageDraw.Draw(wm_layer)
-    # 使用白色/浅灰色高透明度水印，多处覆盖
+    # 浣跨敤鐧借壊/娴呯伆鑹查珮閫忔槑搴︽按鍗帮紝澶氬瑕嗙洊
     wm_color = (180, 180, 180, 70) 
     for row in range(0, canvas.size[1], 1000):
         for col in range(0, 1200, 600):
@@ -828,7 +626,7 @@ def create_viewing_report_pdf(client_name, date_str, address, facing, items_data
     rotated_wm = wm_layer.rotate(35, expand=False)
     canvas.paste(rotated_wm, (0, 0), rotated_wm)
 
-    # 7. 页脚免责声明
+    # 7. 椤佃剼鍏嶈矗澹版槑
     footer_height = 280
     pdf_final_height = y + footer_height
     final_canvas = canvas.crop((0, 0, 1200, int(pdf_final_height)))
@@ -841,9 +639,9 @@ def create_viewing_report_pdf(client_name, date_str, address, facing, items_data
 
     return final_canvas
 
-# --- 4f. 房源对比图生成 (PIL) ---
+# --- 4f. 鎴挎簮瀵规瘮鍥剧敓鎴?(PIL) ---
 def gen_comparison_image(selected_props: List[Dict]) -> Image.Image:
-    # 创建对比长图 (最多4套)
+    # 鍒涘缓瀵规瘮闀垮浘 (鏈€澶?濂?
     n = len(selected_props)
     w, h = 1200, 800 + (n * 250)
     img = Image.new('RGB', (w, h), (255, 255, 255))
@@ -855,12 +653,12 @@ def gen_comparison_image(selected_props: List[Dict]) -> Image.Image:
     except:
         f_h = f_b = f_p = ImageFont.load_default()
 
-    # 标题
+    # 鏍囬
     draw.rectangle([0, 0, w, 120], fill=(191,160,100))
-    draw.text((w//2 - 150, 35), "房源对比表 | Property Comparison", font=f_h, fill=(255,255,255))
+    draw.text((w//2 - 150, 35), "鎴挎簮瀵规瘮琛?| Property Comparison", font=f_h, fill=(255,255,255))
 
-    # 表头
-    headers = ["照片", "房源名称", "区域", "户型", "价格 (PCM)"]
+    # 琛ㄥご
+    headers = ["鐓х墖", "鎴挎簮鍚嶇О", "鍖哄煙", "鎴峰瀷", "浠锋牸 (PCM)"]
     x_offsets = [50, 250, 550, 750, 950]
     for i, head in enumerate(headers):
         draw.text((x_offsets[i], 160), head, font=f_b, fill=(100,100,100))
@@ -869,7 +667,7 @@ def gen_comparison_image(selected_props: List[Dict]) -> Image.Image:
 
     for i, p in enumerate(selected_props):
         y = 250 + (i * 250)
-        # 缩略图
+        # 缂╃暐鍥?
         try:
             r = requests.get(p['poster-link'], timeout=5)
             thumb = Image.open(BytesIO(r.content)).convert("RGB")
@@ -881,41 +679,16 @@ def gen_comparison_image(selected_props: List[Dict]) -> Image.Image:
         draw.text((250, y + 40), str(p['title'])[:20], font=f_b, fill=(40,40,40))
         draw.text((550, y + 40), str(p['region']), font=f_b, fill=(40,40,40))
         draw.text((750, y + 40), str(p['rooms']), font=f_b, fill=(40,40,40))
-        draw.text((950, y + 40), f"£{p['price']}", font=f_p, fill=(191,160,100))
+        draw.text((950, y + 40), f"拢{p['price']}", font=f_p, fill=(191,160,100))
         
         if i < n - 1:
             draw.line([(40, y + 210), (w-40, y + 210)], fill=(240,240,240), width=1)
 
     return img
 
-# --- 4g. 市场热度研究 (Trends) ---
+# --- 4g. 甯傚満鐑害鐮旂┒ (Trends) ---
 def get_market_trends(keyword: str = "London Rent"):
     if not TrendReq: return None
-
-
-headers = raw_rows[0]
-        data_rows = raw_rows[1:]
-        clean_headers = []
-        seen = {}
-        for i, h in enumerate(headers):
-            h = str(h).strip()
-            if not h: h = f"Unnamed_{i}"
-            if h in seen:
-                seen[h] += 1
-                clean_headers.append(f"{h}_{seen[h]}")
-            else:
-                seen[h] = 0
-                clean_headers.append(h)
-        records = []
-        for row in data_rows:
-            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
-            records.append(dict(zip(clean_headers, row)))
-        return records
-    except Exception as e:
-        import streamlit as st
-        st.error(f"⚠️ Read Error: {e}")
-        return []
-
     try:
         pytrends = TrendReq(hl='en-US', tz=360)
         pytrends.build_payload([keyword], cat=0, timeframe='today 3-m', geo='GB-LND')
@@ -924,186 +697,183 @@ headers = raw_rows[0]
     except:
         return None
 
+# --- 4h. 鍚堝悓鎻愬彇 (AI) ---
 
-headers = raw_rows[0]
-        data_rows = raw_rows[1:]
-        clean_headers = []
-        seen = {}
-        for i, h in enumerate(headers):
-            h = str(h).strip()
-            if not h: h = f"Unnamed_{i}"
-            if h in seen:
-                seen[h] += 1
-                clean_headers.append(f"{h}_{seen[h]}")
-            else:
-                seen[h] = 0
-                clean_headers.append(h)
-        records = []
-        for row in data_rows:
-            if len(row) < len(clean_headers): row.extend([""] * (len(clean_headers) - len(row)))
-            records.append(dict(zip(clean_headers, row)))
-        return records
-    except Exception as e:
-        import streamlit as st
-        st.error(f"⚠️ Read Error: {e}")
-        return []
-
-
-# --- 4h. 合同提取 (AI) ---
-
-# --- 4h. 合同助手：智能提取与分析 ---
+# --- 4h. 鍚堝悓鍔╂墜锛氭櫤鑳芥彁鍙栦笌鍒嗘瀽 ---
 def parse_ai_json(text: str) -> Dict[str, Any]:
-    """解析 AI 返回的 JSON，处理可能的 Markdown 代码块"""
+    """瑙ｆ瀽 AI 杩斿洖鐨?JSON锛屽鐞嗗彲鑳界殑 Markdown 浠ｇ爜鍧?""
     try:
         clean = re.sub(r"```json\n|\n```|```", "", text).strip()
         return json.loads(clean)
     except:
         return {}
 
-def extract_contract_pro(pdf_file, target_lang="中文") -> Dict[str, Any]:
-    """深度提取合同关键信息并返回结构化数据（Deep Dive 3.0）"""
-    if not pdfplumber: return {"error": "⚠️ 未安装 pdfplumber 依赖，无法解析 PDF。"}
+def extract_contract_pro(pdf_file, target_lang="涓枃") -> Dict[str, Any]:
+    """娣卞害鎻愬彇鍚堝悓鍏抽敭淇℃伅骞惰繑鍥炵粨鏋勫寲鏁版嵁锛圖eep Dive 3.0锛?""
+    if not pdfplumber: return {"error": "鈿狅笍 鏈畨瑁?pdfplumber 渚濊禆锛屾棤娉曡В鏋?PDF銆?}
     try:
         text = ""
         with pdfplumber.open(pdf_file) as pdf:
-            # 增加扫描深度：读取前 15 页以覆盖大多数 AST 合同的所有关键条款
+            # 澧炲姞鎵弿娣卞害锛氳鍙栧墠 15 椤典互瑕嗙洊澶у鏁?AST 鍚堝悓鐨勬墍鏈夊叧閿潯娆?
             for page in pdf.pages[:15]: 
                 text += page.extract_text() or ""
         
         api_key = st.secrets["OPENAI_API_KEY"]
         lang_instruction = f"All your summaries and highlights MUST be written in {target_lang}."
-        if target_lang == "中文":
-            lang_instruction += " 内容必须使用中文。"
+        if target_lang == "涓枃":
+            lang_instruction += " 鍐呭蹇呴』浣跨敤涓枃銆?
         
         prompt = (
-            f"你是一个专业的英国房屋租赁法务专家。请深度阅读并分析这段 AST 合同文本，并将其分解为多个部分，以 JSON 格式输出。\n"
-            f"要求：\n"
-            f"1. 务必提取基础元数据：房东、租客、房屋地址、月租(Rent PCM)、押金(Deposit)、起租日期(Starting Date/Commencement Date)、终止日期、租期时长、解约条款(Break Clause)。\n"
-            f"2. 除了元数据，请识别合同中的每个大模块（如 Tenant's Obligation, Landlord's Covenants, End of Tenancy, Special Clauses 等）。\n"
-            f"3. 对每个模块进行深度的     for s in data.get('Sections', []):
-            f"分析，总结核心条款、潜在风险，并高亮对租客不利的内容。\n"
+            f"浣犳槸涓€涓笓涓氱殑鑻卞浗鎴垮眿绉熻祦娉曞姟涓撳銆傝娣卞害闃呰骞跺垎鏋愯繖娈?AST 鍚堝悓鏂囨湰锛屽苟灏嗗叾鍒嗚В涓哄涓儴鍒嗭紝浠?JSON 鏍煎紡杈撳嚭銆俓n"
+            f"瑕佹眰锛歕n"
+            f"1. 鍔″繀鎻愬彇鍩虹鍏冩暟鎹細鎴夸笢銆佺瀹€佹埧灞嬪湴鍧€銆佹湀绉?Rent PCM)銆佹娂閲?Deposit)銆佽捣绉熸棩鏈?Starting Date/Commencement Date)銆佺粓姝㈡棩鏈熴€佺鏈熸椂闀裤€佽В绾︽潯娆?Break Clause)銆俓n"
+            f"2. 闄や簡鍏冩暟鎹紝璇疯瘑鍒悎鍚屼腑鐨勬瘡涓ぇ妯″潡锛堝 Tenant's Obligation, Landlord's Covenants, End of Tenancy, Special Clauses 绛夛級銆俓n"
+                        f"3. 瀵规瘡涓ā鍧楄繘琛屾繁搴︾殑鍒嗘瀽锛屾€荤粨鏍稿績鏉℃銆佹綔鍦ㄩ闄╋紝骞堕珮浜绉熷涓嶅埄鐨勫唴瀹广€俓n"
             f"{lang_instruction}\n"
-            f"必须以 JSON 格式返回，包含: Metadata (Dict), Sections (List), Risks (String), Summary (String)。"\n
-        )\n
-        r = requests.post("https://api.deepseek.com/chat/completions",\n
-            json={"model": "deepseek-chat", "messages": [{"role": "system", "content": prompt}, {"role": "user", "content": text[:30000]}], "response_format": {"type": "json_object"}},\n
-            headers={"Authorization": f"Bearer {api_key}"}, timeout=60)\n
-        data = parse_ai_json(r.json()['choices'][0]['message']['content'])\n
-        sections.append({
-            "Heading": sanitize_text(s.get('Heading', '')),
-            "Content": sanitize_text(s.get('Content', ''))
-        })
-    
-    risks_txt = sanitize_text(data.get('Risks', ''))
-    summary_txt = sanitize_text(data.get('Summary', ''))
-    
-    # 动态高度计算重构
-    y_ptr = 450 
-    # Metadata: 预估高度 (3个 Full Row + 3个 Grid Row)
-    y_ptr += 3 * 120 # Metadata Full Rows
-    y_ptr += 3 * 100 # Metadata Grid Rows
-    
-    for s in sections:
-        y_ptr += 120 # Padding/Header
-        lines = get_lines(s["Content"], f_body, 1020)
-        y_ptr += len(lines) * 45 + 80
-    
-    y_ptr += 250 + len(get_lines(risks_txt, f_body, 1020)) * 45
-    y_ptr += 150 + len(get_lines(summary_txt, f_body, 1020)) * 45
-    
-    total_est_height = y_ptr + 800
-    
-    canvas = Image.new('RGB', (1200, int(total_est_height)), (255, 255, 255))
-    draw = ImageDraw.Draw(canvas)
-    
-    def draw_wrapped_text(draw, text, x, y, font, max_width, fill=(60, 60, 60), line_h=1.5):
-        lines = get_lines(text, font, max_width)
-        for line in lines:
-            draw.text((x, y), line, font=font, fill=fill)
-            y += int(font.size * line_h)
-        return y
-
-    def draw_meta_row_full(draw, y, label, val, font_label, font_val):
-        draw.text((80, y), f"{label}:", font=font_label, fill=(130, 130, 130))
-        y += 40
-        # 值加粗/深色，并从缩进处开始
-        new_y = draw_wrapped_text(draw, val, 100, y, font_val, 1020, fill=(30, 30, 30), line_h=1.4)
-        return max(y + 60, new_y + 30)
-
-    def draw_meta_grid(draw, y, l1, v1, l2, v2, font_label, font_val):
-        # 左列: 限制宽度防止溢出到右列
-        draw.text((80, y), f"{l1}:", font=font_label, fill=(130, 130, 130))
-        draw_wrapped_text(draw, str(v1), 80, y + 35, font_val, 480, fill=(30, 30, 30), line_h=1.3)
-        # 右列
-        draw.text((600, y), f"{l2}:", font=font_label, fill=(130, 130, 130))
-        draw_wrapped_text(draw, str(v2), 600, y + 35, font_val, 520, fill=(30, 30, 30), line_h=1.3)
-        return y + 115
-
-    # 1. 页眉 Banner (高级深灰)
-    draw.rectangle([(0, 0), (1200, 180)], fill=(35, 35, 35))
-    
-    # 动态居中/安全渲染标题
-    report_title = L["Title"]
-    title_w = _dummy_draw.textlength(report_title, font=f_banner)
-    if title_w > 1080: # 如果太长，尝试缩小字号或强制居中
-        # 简单修正：字号已根据长度缩放，这里额外确保居中且不溢出
-        draw_wrapped_text(draw, report_title, 60, 50, f_banner, 1080, fill=(191, 160, 100), line_h=1.2)
-    else:
-        # 居中渲染
-        title_x = (1200 - title_w) // 2
-        draw.text((title_x, 55), report_title, font=f_banner, fill=(191, 160, 100))
-    
-    y = 240
-    # 2. 基础财务 & 关键日期 (精品网格布局)
-    draw.text((60, y), L["MetaTitle"], font=f_section, fill=(191, 160, 100))
-    y += 100
-    # 房东、租客、地址 通常较长，始终占全行
-    y = draw_meta_row_full(draw, y, L["Landlord"], meta.get('Landlord', 'N/A'), f_label, f_body)
-    y = draw_meta_row_full(draw, y, L["Tenant"], meta.get('Tenant', 'N/A'), f_label, f_body)
-    y = draw_meta_row_full(draw, y, L["Address"], meta.get('Address', 'N/A'), f_label, f_body)
-    
-    # 金额与日期 较短，可以使用网格
-    y = draw_meta_grid(draw, y, L["Rent"], meta.get('RentPCM', 'N/A'), L["Deposit"], meta.get('Deposit', 'N/A'), f_label, f_body)
-    y = draw_meta_grid(draw, y, L["StartDate"], meta.get('StartDate', 'N/A'), L["EndDate"], meta.get('EndDate', 'N/A'), f_label, f_body)
-    # Term 和 Break Clause 尤其后者可能很长，虽然放网格但需小心 (这里强制 BreakClause 为 Full Row)
-    y = draw_meta_grid(draw, y, L["Term"], meta.get('Term', 'N/A'), "...", "...", f_label, f_body)
-    y = draw_meta_row_full(draw, y, L["Break"], meta.get('BreakClause', 'N/A'), f_label, f_body)
-    
-    y += 80
-    # 3. 逐章节核心分析 (Premium Card Layout)
-    for s in sections:
-        header = s.get('Heading', 'Summary')
-        content = s.get('Content', '')
-        if not content: continue
+            f"蹇呴』浠?JSON 鏍煎紡杩斿洖锛屽寘鍚? Metadata (Dict), Sections (List of Headings/Content), Risks (String), Summary (String)銆?
+        )
         
-        # 预估卡片高度
-        sec_lines = get_lines(content, f_body, 1000)
-        card_h = 130 + len(sec_lines) * 44
+        r = requests.post("https://api.deepseek.com/chat/completions",
+            json={
+                "model": "deepseek-chat", 
+                "messages": [{"role": "system", "content": prompt}, {"role": "user", "content": text[:30000]}],
+                "response_format": {"type": "json_object"}
+            },
+            headers={"Authorization": f"Bearer {api_key}"}, timeout=60)
         
-        # 绘制阴影效果/背景
-        draw.rectangle([(65, y+5), (1135, y + card_h + 5)], fill=(240, 240, 240)) # 阴影
-        draw.rectangle([(60, y), (1130, y + card_h)], fill=(255, 255, 255), outline=(225, 225, 225))
-        draw.rectangle([(60, y), (75, y + card_h)], fill=(191, 160, 100)) # 左侧品牌色装饰
+        data = parse_ai_json(r.json()['choices'][0]['message']['content'])
+        return data
+    except Exception as e:
+        return {"error": str(e)}
+
+def create_contract_analysis_pdf(data, lang="中文"):
+    """使用 PIL 生成极具设计感的合同分析长图 (Premium Version)"""
+    from PIL import Image, ImageDraw, ImageFont
+    import streamlit as st
+    try:
+        banner_size = 50 if lang == "English" else 62
+        try:
+            f_header = ImageFont.truetype("simhei.ttf", 36)
+            f_section = ImageFont.truetype("simhei.ttf", 34)
+            f_body = ImageFont.truetype("simhei.ttf", 28)
+            f_label = ImageFont.truetype("simhei.ttf", 28)
+            f_footer = ImageFont.truetype("simhei.ttf", 20)
+            f_banner = ImageFont.truetype("simhei.ttf", banner_size)
+            f_wm = ImageFont.truetype("simhei.ttf", 150)
+        except:
+            f_header = f_section = f_body = f_label = f_footer = f_banner = f_wm = ImageFont.load_default()
+
+        def sanitize_text(t):
+            if not t or not isinstance(t, str): return "N/A"
+            t = t.replace("£", "GBP").replace("ø", "o").replace("–", "-").replace("—", "-")
+            return "".join(c for c in t if ord(c) < 0xFFFF)
         
-        draw.text((100, y + 35), f"▶ {header}", font=f_section, fill=(191, 160, 100))
-        y += 110
-        y = draw_wrapped_text(draw, content, 100, y, f_body, 1000, fill=(60, 60, 60), line_h=1.6)
-        y += 100 # Section spacing
-t.truetype("simhei.ttf", 28)
-        f_footer = ImageFont.truetype("simhei.ttf", 20)
-        f_banner = ImageFont.truetype("simhei.ttf", banner_size)
-        f_wm = ImageFont.truetype("simhei.ttf", 150)
-    except:
-        f_header = f_section = f_body = f_label = f_footer = f_banner = f_wm = ImageFont.load_default()
+        _dummy_draw = ImageDraw.Draw(Image.new('RGB', (1, 1)))
+
+        def get_lines(text, font, max_width):
+            text = sanitize_text(text)
+            if not text: return []
+            lines, current_line = [], ""
+            for char in str(text):
+                test_line = current_line + char
+                if _dummy_draw.textlength(test_line, font=font) <= max_width:
+                    current_line = test_line
+                else:
+                    lines.append(current_line)
+                    current_line = char
+            lines.append(current_line)
+            return lines
+
+        def draw_wrapped_text(draw, text, x, y, font, max_width, fill=(60, 60, 60), line_h=1.5):
+            lines = get_lines(text, font, max_width)
+            for line in lines:
+                draw.text((x, y), line, font=font, fill=fill)
+                y += int(font.size * line_h)
+            return y
+
+        def draw_meta_row_full(draw, y, label, val, font_label, font_val):
+            draw.text((80, y), f"{label}:", font=font_label, fill=(130, 130, 130))
+            y += 40
+            new_y = draw_wrapped_text(draw, val, 100, y, font_val, 1020, fill=(30, 30, 30), line_h=1.4)
+            return max(y + 65, new_y + 35)
+
+        def draw_meta_grid(draw, y, l1, v1, l2, v2, font_label, font_val):
+            draw.text((80, y), f"{l1}:", font=font_label, fill=(130, 130, 130))
+            draw_wrapped_text(draw, str(v1), 80, y + 35, font_val, 480, fill=(30, 30, 30), line_h=1.3)
+            draw.text((600, y), f"{l2}:", font=font_label, fill=(130, 130, 130))
+            draw_wrapped_text(draw, str(v2), 600, y + 35, font_val, 520, fill=(30, 30, 30), line_h=1.3)
+            return y + 120
+
+        meta = {k: sanitize_text(v) for k, v in data.get('Metadata', {}).items()}
+        sections = []
+        for s in data.get('Sections', []):
+            sections.append({"Heading": sanitize_text(s.get('Heading', '')), "Content": sanitize_text(s.get('Content', ''))})
+        risks_txt = sanitize_text(data.get('Risks', ''))
+        summary_txt = sanitize_text(data.get('Summary', ''))
+
+        L = {
+            "中文": {"Title": "Hao Harbour - 合同解析报告", "MetaTitle": "1. 合同元数据", "RiskTitle": "风险提醒", "SummaryTitle": "总体评价", "Landlord": "房东", "Tenant": "租客", "Address": "房屋地址", "Rent": "月租金", "Deposit": "押金", "StartDate": "起租日期", "EndDate": "到期日期", "Term": "租期", "Break": "解约条款", "Disclaimer": "免责声明: 此报告由 AI 自动生成，仅供参考。"},
+            "English": {"Title": "Hao Harbour - Contract Analysis", "MetaTitle": "1. Metadata", "RiskTitle": "Risk Analysis", "SummaryTitle": "Conclusion", "Landlord": "Landlord", "Tenant": "Tenant", "Address": "Address", "Rent": "Rent PCM", "Deposit": "Deposit", "StartDate": "Start Date", "EndDate": "End Date", "Term": "Term", "Break": "Break Clause", "Disclaimer": "Disclaimer: AI-generated for reference."}
+        }.get(lang, "中文")
+
+        y_ptr = 450 + (len(sections) * 200) + (len(get_lines(risks_txt, f_body, 1000)) * 50) + 1200
+        canvas = Image.new('RGB', (1200, int(y_ptr)), (255, 255, 255))
+        draw = ImageDraw.Draw(canvas)
+
+        draw.rectangle([(0, 0), (1200, 180)], fill=(35, 35, 35))
+        draw.text((80, 55), L["Title"], font=f_banner, fill=(191, 160, 100))
+        y = 230
+        draw.text((60, y), L["MetaTitle"], font=f_section, fill=(191, 160, 100))
+        y += 100
+        y = draw_meta_row_full(draw, y, L["Landlord"], meta.get('Landlord', 'N/A'), f_label, f_body)
+        y = draw_meta_row_full(draw, y, L["Tenant"], meta.get('Tenant', 'N/A'), f_label, f_body)
+        y = draw_meta_row_full(draw, y, L["Address"], meta.get('Address', 'N/A'), f_label, f_body)
+        y = draw_meta_grid(draw, y, L["Rent"], meta.get('RentPCM', 'N/A'), L["Deposit"], meta.get('Deposit', 'N/A'), f_label, f_body)
+        y = draw_meta_grid(draw, y, L["StartDate"], meta.get('StartDate', 'N/A'), L["EndDate"], meta.get('EndDate', 'N/A'), f_label, f_body)
+        y = draw_meta_row_full(draw, y, L["Break"], meta.get('BreakClause', 'N/A'), f_label, f_body)
+        
+        y += 80
+        for s in sections:
+            header, content = s['Heading'], s['Content']
+            if not content: continue
+            draw.rectangle([(60, y), (1140, y + 2)], fill=(230, 230, 230))
+            y += 40
+            draw.text((80, y), f"▶ {header}", font=f_section, fill=(191, 160, 100))
+            y += 80
+            y = draw_wrapped_text(draw, content, 100, y, f_body, 1000, line_h=1.5)
+            y += 80
+
+        y += 50
+        draw.text((60, y), L["RiskTitle"], font=f_section, fill=(200, 0, 0))
+        y += 80
+        y = draw_wrapped_text(draw, risks_txt, 80, y, f_body, 1040, fill=(180, 0, 0))
+        
+        y += 50
+        draw.text((60, y), L["SummaryTitle"], font=f_section, fill=(50, 50, 50))
+        y += 80
+        y = draw_wrapped_text(draw, summary_txt, 80, y, f_body, 1040)
+        
+        wm = Image.new('RGBA', canvas.size, (0,0,0,0))
+        ImageDraw.Draw(wm).text((200, 1000), "Hao Harbour Analysis", font=f_wm, fill=(180,180,180,60))
+        canvas.paste(wm.rotate(30, expand=False), (0,0), wm.rotate(30, expand=False))
+        
+        draw.rectangle([(0, y + 200), (1200, y + 450)], fill=(245, 245, 245))
+        draw_wrapped_text(draw, L["Disclaimer"], 80, y + 280, f_footer, 1040, fill=(150, 150, 150))
+        
+        return canvas.crop((0, 0, 1200, y + 450))
+    except Exception as e:
+        st.error(f"PDF生成失败: {e}")
+        return None
+
 
     def sanitize_text(t):
         if not t or not isinstance(t, str): return ""
-        # 替换常见特殊符号，SimHei 有时无法处理
-        t = t.replace("£", "GBP").replace("ø", "o").replace("–", "-").replace("—", "-")
-        # 过滤掉无法渲染的 Emoji 或非 BMP 字符 (包括 0xFFFF 及以上)
+        # 鏇挎崲甯歌鐗规畩绗﹀彿锛孲imHei 鏈夋椂鏃犳硶澶勭悊
+        t = t.replace("拢", "GBP").replace("酶", "o").replace("鈥?, "-").replace("鈥?, "-")
+        # 杩囨护鎺夋棤娉曟覆鏌撶殑 Emoji 鎴栭潪 BMP 瀛楃 (鍖呮嫭 0xFFFF 鍙婁互涓?
         return "".join(c for c in t if ord(c) < 0xFFFF)
 
-    # 创建一个全局用于测量的 dummy image
+    # 鍒涘缓涓€涓叏灞€鐢ㄤ簬娴嬮噺鐨?dummy image
     _dummy_img = Image.new('RGB', (1, 1))
     _dummy_draw = ImageDraw.Draw(_dummy_img)
 
@@ -1115,7 +885,7 @@ t.truetype("simhei.ttf", 28)
         for char in str(text):
             test_line = current_line + char
             try:
-                # 使用全局测量对象，避免重复创建 Image
+                # 浣跨敤鍏ㄥ眬娴嬮噺瀵硅薄锛岄伩鍏嶉噸澶嶅垱寤?Image
                 w = _dummy_draw.textlength(test_line, font=font)
                 if w <= max_width:
                     current_line = test_line
@@ -1128,7 +898,7 @@ t.truetype("simhei.ttf", 28)
         lines.append(current_line)
         return lines
 
-    # 第一步：清洗并计算高度
+    # 绗竴姝ワ細娓呮礂骞惰绠楅珮搴?
     meta = {k: sanitize_text(v) for k, v in data.get('Metadata', {}).items()}
     sections = []
     for s in data.get('Sections', []):
@@ -1170,72 +940,72 @@ t.truetype("simhei.ttf", 28)
         return max(y + 80, new_y + 20)
 
     def draw_meta_grid(draw, y, l1, v1, l2, v2, font_label, font_val):
-        # 左列
+        # 宸﹀垪
         draw.text((80, y), f"{l1}:", font=font_label, fill=(100, 100, 100))
         draw.text((320, y), str(v1), font=font_val, fill=(40, 40, 40))
-        # 右列
+        # 鍙冲垪
         draw.text((600, y), f"{l2}:", font=font_label, fill=(100, 100, 100))
         draw.text((840, y), str(v2), font=font_val, fill=(40, 40, 40))
         return y + 80
 
-    # 1. 页眉 Banner
+    # 1. 椤电湁 Banner
     draw.rectangle([(0, 0), (1200, 160)], fill=(26, 26, 26))
     draw.text((60, 50), L["Title"], font=f_banner, fill=(191, 160, 100))
     
     y = 220
-    # 2. 基础财务 & 关键日期 (精品网格布局)
+    # 2. 鍩虹璐㈠姟 & 鍏抽敭鏃ユ湡 (绮惧搧缃戞牸甯冨眬)
     draw.text((60, y), L["MetaTitle"], font=f_section, fill=(191, 160, 100))
     y += 95
-    # 宽项
+    # 瀹介」
     y = draw_meta_row_full(draw, y, L["Landlord"], meta.get('Landlord', ''), f_label, f_body)
     y = draw_meta_row_full(draw, y, L["Tenant"], meta.get('Tenant', ''), f_label, f_body)
     y = draw_meta_row_full(draw, y, L["Address"], meta.get('Address', ''), f_label, f_body)
-    # 网格项 (2x2)
+    # 缃戞牸椤?(2x2)
     y = draw_meta_grid(draw, y, L["Rent"], meta.get('RentPCM', ''), L["Deposit"], meta.get('Deposit', ''), f_label, f_body)
     y = draw_meta_grid(draw, y, L["StartDate"], meta.get('StartDate', ''), L["EndDate"], meta.get('EndDate', ''), f_label, f_body)
     y = draw_meta_grid(draw, y, L["Term"], meta.get('Term', ''), "Break Clause", meta.get('BreakClause', ''), f_label, f_body)
     
     y += 70
-    # 3. 逐章节核心分析 (Card-based Layout)
+    # 3. 閫愮珷鑺傛牳蹇冨垎鏋?(Card-based Layout)
     for s in sections:
-        # 绘制背景卡片 (浅灰色圆角矩形效果)
+        # 缁樺埗鑳屾櫙鍗＄墖 (娴呯伆鑹插渾瑙掔煩褰㈡晥鏋?
         header = s.get('Heading', 'Summary')
-        # 预估高度用于绘制背景
+        # 棰勪及楂樺害鐢ㄤ簬缁樺埗鑳屾櫙
         sec_lines = get_lines(s["Content"], f_body, 1000)
         card_h = 110 + len(sec_lines) * 45
         draw.rectangle([(70, y), (1130, y + card_h)], fill=(250, 250, 250), outline=(230, 230, 230))
-        draw.rectangle([(70, y), (85, y + card_h)], fill=(191, 160, 100)) # 左侧装饰条
+        draw.rectangle([(70, y), (85, y + card_h)], fill=(191, 160, 100)) # 宸︿晶瑁呴グ鏉?
         
-        draw.text((110, y + 30), f"📍 {header}", font=f_section, fill=(191, 160, 100))
+        draw.text((110, y + 30), f"馃搷 {header}", font=f_section, fill=(191, 160, 100))
         y += 100
         y = draw_wrapped_text(draw, s.get('Content', ''), 110, y, f_body, 980, line_h=1.6)
         y += 80 # Section spacing
 
     y += 40
-    # 4. 风险建议
+    # 4. 椋庨櫓寤鸿
     draw.text((60, y), L["RiskTitle"], font=f_section, fill=(220, 20, 60))
     y += 85
     y = draw_wrapped_text(draw, risks_txt if risks_txt else L["RiskDefault"], 110, y, f_body, 980, fill=(200, 20, 20), line_h=1.6)
     
     y += 40
-    # 5. 总体结论 (Summary Section)
+    # 5. 鎬讳綋缁撹 (Summary Section)
     if summary_txt:
         draw.text((60, y), L["SummaryTitle"], font=f_section, fill=(50, 50, 50))
         y += 85
         y = draw_wrapped_text(draw, summary_txt, 110, y, f_body, 980, line_h=1.6)
         y += 60
 
-    # 6. 水印
+    # 6. 姘村嵃
     wm_layer = Image.new('RGBA', canvas.size, (0, 0, 0, 0))
     wm_draw = ImageDraw.Draw(wm_layer)
     wm_color = (180, 180, 180, 75)
-    wm_txt = "Hao Harbour Intelligence" if lang == "English" else "Hao Harbour 合同深度分析"
+    wm_txt = "Hao Harbour Intelligence" if lang == "English" else "Hao Harbour 鍚堝悓娣卞害鍒嗘瀽"
     for i in range(0, canvas.size[1], 1000):
         wm_draw.text((150, i + 400), wm_txt, font=f_wm, fill=wm_color)
     rotated_wm = wm_layer.rotate(35, expand=False)
     canvas.paste(rotated_wm, (0, 0), rotated_wm)
 
-    # 7. 页脚
+    # 7. 椤佃剼
     footer_height = 320
     total_y = y + 250 + footer_height
     final_canvas = canvas.crop((0, 0, 1200, int(total_y)))
@@ -1247,7 +1017,7 @@ t.truetype("simhei.ttf", 28)
     return final_canvas
 
 
-# --- 初始化带看报告状态 ---
+# --- 鍒濆鍖栧甫鐪嬫姤鍛婄姸鎬?---
 if 'viewing_items' not in st.session_state:
     st.session_state['viewing_items'] = {
         'Interior': {item: 5 for item in VIEWING_DEFAULT_INTERIOR},
@@ -1260,52 +1030,52 @@ if 'viewing_items' not in st.session_state:
 ws = get_ws()
 if ws:
     t1, t2, t3, t4, t5, t6, t7 = st.tabs([
-        "✨ 发布新房源", "⚙️ 管理与统计", "🚀 批量发送引擎",
-        "🌐 多平台内容包", "👁️ 带看小结", "📊 对比与简报", "🧰 工具箱"
+        "鉁?鍙戝竷鏂版埧婧?, "鈿欙笍 绠＄悊涓庣粺璁?, "馃殌 鎵归噺鍙戦€佸紩鎿?,
+        "馃寪 澶氬钩鍙板唴瀹瑰寘", "馃憗锔?甯︾湅灏忕粨", "馃搳 瀵规瘮涓庣畝鎶?, "馃О 宸ュ叿绠?
     ])
     
     with t1:
-        st.subheader("1. 基础信息")
+        st.subheader("1. 鍩虹淇℃伅")
         
-        # --- Rightmove 读取模块 ---
-        rm_url = st.text_input("🔗 自动读取 Rightmove 链接 (选填，自动填入房源信息及图片)")
-        if st.button("🔍 一键读取 Rightmove"):
+        # --- Rightmove 璇诲彇妯″潡 ---
+        rm_url = st.text_input("馃敆 鑷姩璇诲彇 Rightmove 閾炬帴 (閫夊～锛岃嚜鍔ㄥ～鍏ユ埧婧愪俊鎭強鍥剧墖)")
+        if st.button("馃攳 涓€閿鍙?Rightmove"):
             if rm_url:
-                with st.spinner("正在抓取 Rightmove 数据，请稍候..."):
+                with st.spinner("姝ｅ湪鎶撳彇 Rightmove 鏁版嵁锛岃绋嶅€?.."):
                     data, err = scrape_rightmove(rm_url)
                     if err:
                         st.error(err)
                     else:
                         st.session_state['rm_data'] = data
-                        st.success("✅ 读取成功！请复核下方自动填充的信息。")
+                        st.success("鉁?璇诲彇鎴愬姛锛佽澶嶆牳涓嬫柟鑷姩濉厖鐨勪俊鎭€?)
             else:
-                st.warning("请输入 Rightmove 链接")
+                st.warning("璇疯緭鍏?Rightmove 閾炬帴")
         
         rm_data = st.session_state.get('rm_data', {})
         
         c1, c2, c3, c4 = st.columns(4)
-        p_name = c1.text_input("房源名称", value=rm_data.get('title', ''))
-        p_price = c2.number_input("月租 (£)", min_value=0, value=rm_data.get('price', 0))
-        reg_opts = ["中伦敦", "东伦敦", "西伦敦", "北伦敦", "南伦敦"]
-        auto_reg = rm_data.get('region', '中伦敦')
+        p_name = c1.text_input("鎴挎簮鍚嶇О", value=rm_data.get('title', ''))
+        p_price = c2.number_input("鏈堢 (拢)", min_value=0, value=rm_data.get('price', 0))
+        reg_opts = ["涓鸡鏁?, "涓滀鸡鏁?, "瑗夸鸡鏁?, "鍖椾鸡鏁?, "鍗椾鸡鏁?]
+        auto_reg = rm_data.get('region', '涓鸡鏁?)
         auto_reg_idx = reg_opts.index(auto_reg) if auto_reg in reg_opts else 0
         detected_pc = rm_data.get('postcode', '')
-        reg_label = f"区域 {'🎯 已自动识别 ' + detected_pc if detected_pc else '(可手动修改)'}"
+        reg_label = f"鍖哄煙 {'馃幆 宸茶嚜鍔ㄨ瘑鍒?' + detected_pc if detected_pc else '(鍙墜鍔ㄤ慨鏀?'}"
         p_reg = c3.selectbox(reg_label, reg_opts, index=auto_reg_idx)
         
-        rooms_opts = ["Studio", "1房", "2房", "3房", "4房+"]
+        rooms_opts = ["Studio", "1鎴?, "2鎴?, "3鎴?, "4鎴?"]
         default_room = rm_data.get('rooms', '')
         idx_room = rooms_opts.index(default_room) if default_room in rooms_opts else 0
-        p_rooms = c4.selectbox("户型", rooms_opts, index=idx_room)
+        p_rooms = c4.selectbox("鎴峰瀷", rooms_opts, index=idx_room)
         
-        en_desc = st.text_area("英文原始描述", value=rm_data.get('description', ''))
-        if st.button("🪄 AI 生成中文文案"):
+        en_desc = st.text_area("鑻辨枃鍘熷鎻忚堪", value=rm_data.get('description', ''))
+        if st.button("馃獎 AI 鐢熸垚涓枃鏂囨"):
             st.session_state['zh_content'] = call_smart_ai(en_desc)
         
-        zh_desc = st.text_area("最终展示描述", value=st.session_state.get('zh_content', ''), height=150)
-        up_imgs = st.file_uploader("上传房源图 (建议8张, 将覆盖自动抓取的图片)", accept_multiple_files=True)
+        zh_desc = st.text_area("鏈€缁堝睍绀烘弿杩?, value=st.session_state.get('zh_content', ''), height=150)
+        up_imgs = st.file_uploader("涓婁紶鎴挎簮鍥?(寤鸿8寮? 灏嗚鐩栬嚜鍔ㄦ姄鍙栫殑鍥剧墖)", accept_multiple_files=True)
         
-        # 准备合并图片来源
+        # 鍑嗗鍚堝苟鍥剧墖鏉ユ簮
         files_to_use = up_imgs
         rm_image_urls = rm_data.get('images', [])
         
@@ -1320,13 +1090,13 @@ if ws:
                     pass
         
         if files_to_use:
-            # 修改点：传入了 p_reg 区域和 8图排版
+            # 淇敼鐐癸細浼犲叆浜?p_reg 鍖哄煙鍜?8鍥炬帓鐗?
             preview_img = create_poster(files_to_use, p_name, p_price, p_rooms, p_reg)
             if preview_img:
-                st.image(preview_img, caption="双水印强化海报预览", width=450)
+                st.image(preview_img, caption="鍙屾按鍗板己鍖栨捣鎶ラ瑙?, width=450)
                 
-                if st.button("🚀 立即发布"):
-                    with st.spinner("同步云端中..."):
+                if st.button("馃殌 绔嬪嵆鍙戝竷"):
+                    with st.spinner("鍚屾浜戠涓?.."):
                         buf = BytesIO()
                         preview_img.save(buf, format="JPEG", quality=95)
                         upload_res = cloudinary.uploader.upload(buf.getvalue())
@@ -1338,7 +1108,7 @@ if ws:
                         p_lng = rm_data.get('lng', '')
                         # Index 10 is reserved for manual walkingMinutes to ensure backward compatibility
                         ws.append_row([now, p_name, p_reg, p_rooms, int(p_price), img_url, zh_desc, 0, 0, p_station, "", p_lat, p_lng])
-                        st.success("发布成功！海报已存档。")
+                        st.success("鍙戝竷鎴愬姛锛佹捣鎶ュ凡瀛樻。銆?)
                         st.rerun()
 
     with t2:
@@ -1346,88 +1116,88 @@ if ws:
         if data:
             df = pd.DataFrame(data)
             
-            # --- 增加大盘 (Executive Dashboard) ---
-            st.markdown("### 📊 排行榜与数据引擎 (Executive Dashboard)")
+            # --- 澧炲姞澶х洏 (Executive Dashboard) ---
+            st.markdown("### 馃搳 鎺掕姒滀笌鏁版嵁寮曟搸 (Executive Dashboard)")
             metric_cols = st.columns(3)
-            metric_cols[0].metric("累计访问量", int(pd.to_numeric(df['views'], errors='coerce').sum()))
-            metric_cols[1].metric("在租房源数", len(df))
-            metric_cols[2].metric("精选置顶数", len(df[df.get('is_featured', 0) == 1]))
+            metric_cols[0].metric("绱璁块棶閲?, int(pd.to_numeric(df['views'], errors='coerce').sum()))
+            metric_cols[1].metric("鍦ㄧ鎴挎簮鏁?, len(df))
+            metric_cols[2].metric("绮鹃€夌疆椤舵暟", len(df[df.get('is_featured', 0) == 1]))
             
-            # 图表
+            # 鍥捐〃
             c_d1, c_d2 = st.columns(2)
             with c_d1:
-                st.markdown("**各区域热度分布**")
+                st.markdown("**鍚勫尯鍩熺儹搴﹀垎甯?*")
                 reg_views = df.groupby('region')['views'].sum().reset_index()
                 st.bar_chart(reg_views.set_index('region'))
             with c_d2:
-                st.markdown("**最受关注户型**")
+                st.markdown("**鏈€鍙楀叧娉ㄦ埛鍨?*")
                 room_views = df.groupby('rooms')['views'].sum().reset_index()
                 st.bar_chart(room_views.set_index('rooms'))
             
             st.markdown("---")
-            search = st.text_input("🔍 快速搜索房源...").lower()
+            search = st.text_input("馃攳 蹇€熸悳绱㈡埧婧?..").lower()
             f_df = df[df['title'].astype(str).str.lower().str.contains(search)] if search else df
             
             for i, row in f_df.iterrows():
                 idx = i + 2
-                with st.expander(f"{row['title']} (浏览: {row.get('views',0)})"):
+                with st.expander(f"{row['title']} (娴忚: {row.get('views',0)})"):
                     with st.form(f"edit_{idx}"):
                         ca, cb, cc, cd = st.columns(4)
-                        nt = ca.text_input("标题", row['title'])
-                        np = cb.number_input("价格", value=int(float(row['price'] or 0)))
-                        nr = cc.selectbox("区域", ["中伦敦", "东伦敦", "西伦敦", "北伦敦", "南伦敦"], index=["中伦敦", "东伦敦", "西伦敦", "北伦敦", "南伦敦"].index(row['region']) if row['region'] in ["中伦敦", "东伦敦", "西伦敦", "北伦敦", "南伦敦"] else 0)
-                        nrm_opts = ["Studio", "1房", "2房", "3房", "4房+"]
-                        nrm = cd.selectbox("户型", nrm_opts, index=nrm_opts.index(row['rooms']) if row['rooms'] in nrm_opts else 0)
-                        nd = st.text_area("文案", value=row['description'], height=100)
-                        isf = st.checkbox("精选置顶", value=bool(row.get('is_featured', 0)))
+                        nt = ca.text_input("鏍囬", row['title'])
+                        np = cb.number_input("浠锋牸", value=int(float(row['price'] or 0)))
+                        nr = cc.selectbox("鍖哄煙", ["涓鸡鏁?, "涓滀鸡鏁?, "瑗夸鸡鏁?, "鍖椾鸡鏁?, "鍗椾鸡鏁?], index=["涓鸡鏁?, "涓滀鸡鏁?, "瑗夸鸡鏁?, "鍖椾鸡鏁?, "鍗椾鸡鏁?].index(row['region']) if row['region'] in ["涓鸡鏁?, "涓滀鸡鏁?, "瑗夸鸡鏁?, "鍖椾鸡鏁?, "鍗椾鸡鏁?] else 0)
+                        nrm_opts = ["Studio", "1鎴?, "2鎴?, "3鎴?, "4鎴?"]
+                        nrm = cd.selectbox("鎴峰瀷", nrm_opts, index=nrm_opts.index(row['rooms']) if row['rooms'] in nrm_opts else 0)
+                        nd = st.text_area("鏂囨", value=row['description'], height=100)
+                        isf = st.checkbox("绮鹃€夌疆椤?, value=bool(row.get('is_featured', 0)))
                         
                         s1, s2 = st.columns(2)
-                        if s1.form_submit_button("保存"):
+                        if s1.form_submit_button("淇濆瓨"):
                             ws.update(f"A{idx}:I{idx}", [[row['date'], nt, nr, nrm, np, row['poster-link'], nd, row['views'], 1 if isf else 0]])
                             st.rerun()
-                        if s2.form_submit_button("删除"):
+                        if s2.form_submit_button("鍒犻櫎"):
                             ws.delete_rows(idx)
                             st.rerun()
                     
                     # --- Multi-version Copywriting ---
-                    st.markdown("💬 **一键私域营销话术**")
-                    moments_txt = f"🌟【{row['region']} VIP新盘首发】\n🏢 {row['title']}\n🛏️ {row['rooms']} | 💰 {row['price']}/月\n\n稀缺奢华好房，带有专属设施服务。\n欢迎私信获取完整高清相册及看房名额！"
-                    dm_txt = f"哈喽～给您推荐一套在{row['region']}的【{row['title']}】！\n这个是{row['rooms']}，目前租金是 {row['price']}/月。性价比非常高！\n您看下主页这个房源的海报跟详情，如果感兴趣咱们可以随时安排看房哦！"
+                    st.markdown("馃挰 **涓€閿鍩熻惀閿€璇濇湳**")
+                    moments_txt = f"馃専銆恵row['region']} VIP鏂扮洏棣栧彂銆慭n馃彚 {row['title']}\n馃洀锔?{row['rooms']} | 馃挵 {row['price']}/鏈圽n\n绋€缂哄ア鍗庡ソ鎴匡紝甯︽湁涓撳睘璁炬柦鏈嶅姟銆俓n娆㈣繋绉佷俊鑾峰彇瀹屾暣楂樻竻鐩稿唽鍙婄湅鎴垮悕棰濓紒"
+                    dm_txt = f"鍝堝柦锝炵粰鎮ㄦ帹鑽愪竴濂楀湪{row['region']}鐨勩€恵row['title']}銆戯紒\n杩欎釜鏄瘂row['rooms']}锛岀洰鍓嶇閲戞槸 {row['price']}/鏈堛€傛€т环姣旈潪甯搁珮锛乗n鎮ㄧ湅涓嬩富椤佃繖涓埧婧愮殑娴锋姤璺熻鎯咃紝濡傛灉鎰熷叴瓒ｅ挶浠彲浠ラ殢鏃跺畨鎺掔湅鎴垮摝锛?
                     c_m1, c_m2 = st.columns(2)
-                    c_m1.text_area("朋友圈高冷名片版", value=moments_txt, height=130, key=f"mom_{idx}")
-                    c_m2.text_area("微信亲和私聊版", value=dm_txt, height=130, key=f"dm_{idx}")
+                    c_m1.text_area("鏈嬪弸鍦堥珮鍐峰悕鐗囩増", value=moments_txt, height=130, key=f"mom_{idx}")
+                    c_m2.text_area("寰俊浜插拰绉佽亰鐗?, value=dm_txt, height=130, key=f"dm_{idx}")
 
     with t3:
-        st.subheader("🚀 批量印钞机 (Bulk Scraper Engine)")
-        st.info("💡 批量粘贴 Rightmove 链接，去泡杯咖啡，系统会为您自动抓取图片、排版海报上云、AI写文案，并在后台静默发房！区域将自动根据邮编识别，无需手动指定。")
-        bulk_urls = st.text_area("输入 Rightmove 链接 (每行一个)", height=200, placeholder="https://www.rightmove.co.uk/properties/12345...\nhttps://www.rightmove.co.uk/properties/67890...")
+        st.subheader("馃殌 鎵归噺鍗伴挒鏈?(Bulk Scraper Engine)")
+        st.info("馃挕 鎵归噺绮樿创 Rightmove 閾炬帴锛屽幓娉℃澂鍜栧暋锛岀郴缁熶細涓烘偍鑷姩鎶撳彇鍥剧墖銆佹帓鐗堟捣鎶ヤ笂浜戙€丄I鍐欐枃妗堬紝骞跺湪鍚庡彴闈欓粯鍙戞埧锛佸尯鍩熷皢鑷姩鏍规嵁閭紪璇嗗埆锛屾棤闇€鎵嬪姩鎸囧畾銆?)
+        bulk_urls = st.text_area("杈撳叆 Rightmove 閾炬帴 (姣忚涓€涓?", height=200, placeholder="https://www.rightmove.co.uk/properties/12345...\nhttps://www.rightmove.co.uk/properties/67890...")
         
         b_c1, b_c2 = st.columns(2)
-        bulk_reg = b_c1.selectbox("兜底默认区域 (邮编识别失败时使用)", ["中伦敦", "东伦敦", "西伦敦", "北伦敦", "南伦敦"])
-        bulk_room_opts = ["Studio", "1房", "2房", "3房", "4房+"]
-        bulk_room = b_c2.selectbox("降级默认户型 (抓取不到时的回退值)", bulk_room_opts, index=0)
+        bulk_reg = b_c1.selectbox("鍏滃簳榛樿鍖哄煙 (閭紪璇嗗埆澶辫触鏃朵娇鐢?", ["涓鸡鏁?, "涓滀鸡鏁?, "瑗夸鸡鏁?, "鍖椾鸡鏁?, "鍗椾鸡鏁?])
+        bulk_room_opts = ["Studio", "1鎴?, "2鎴?, "3鎴?, "4鎴?"]
+        bulk_room = b_c2.selectbox("闄嶇骇榛樿鎴峰瀷 (鎶撳彇涓嶅埌鏃剁殑鍥為€€鍊?", bulk_room_opts, index=0)
         
-        if st.button("⚡ 开始批量全自动处理 (Start Bulk Process)", type="primary"):
+        if st.button("鈿?寮€濮嬫壒閲忓叏鑷姩澶勭悊 (Start Bulk Process)", type="primary"):
             urls = [u.strip() for u in bulk_urls.split('\n') if u.strip().startswith('http')]
             if not urls:
-                st.warning("您还没有输入任何链接哦！")
+                st.warning("鎮ㄨ繕娌℃湁杈撳叆浠讳綍閾炬帴鍝︼紒")
             else:
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 success_count = 0
                 
                 for i, url in enumerate(urls):
-                    status_text.text(f"正在处理 ({i+1}/{len(urls)}): {url}")
+                    status_text.text(f"姝ｅ湪澶勭悊 ({i+1}/{len(urls)}): {url}")
                     scraped_data, err = scrape_rightmove(url)
                     if err:
-                        st.warning(f"⚠️ 跳过 [{i+1}]：抓取失败 — {err}")
+                        st.warning(f"鈿狅笍 璺宠繃 [{i+1}]锛氭姄鍙栧け璐?鈥?{err}")
                         progress_bar.progress((i + 1) / len(urls))
                         continue
                     if not isinstance(scraped_data, dict):
-                        st.warning(f"⚠️ 跳过 [{i+1}]：解析数据失败，请检查链接是否为有效房源页")
+                        st.warning(f"鈿狅笍 璺宠繃 [{i+1}]锛氳В鏋愭暟鎹け璐ワ紝璇锋鏌ラ摼鎺ユ槸鍚︿负鏈夋晥鎴挎簮椤?)
                         progress_bar.progress((i + 1) / len(urls))
                         continue
-                    # 下载图片
+                    # 涓嬭浇鍥剧墖
                     files_to_use = []
                     img_list: Any = scraped_data.get('images', [])
                     if isinstance(img_list, list):
@@ -1439,19 +1209,19 @@ if ws:
                             except: pass
                     
                     if not files_to_use:
-                        st.warning(f"⚠️ 跳过 [{i+1}]：该房源没有可用图片")
+                        st.warning(f"鈿狅笍 璺宠繃 [{i+1}]锛氳鎴挎簮娌℃湁鍙敤鍥剧墖")
                         progress_bar.progress((i + 1) / len(urls))
                         continue
                     
                     rooms_val: str = str(scraped_data.get('rooms', bulk_room))
                     if rooms_val not in bulk_room_opts: rooms_val = bulk_room
-                    # 智能分区：优先用邮编自动识别的区域，失败时才用兜底默认值
+                    # 鏅鸿兘鍒嗗尯锛氫紭鍏堢敤閭紪鑷姩璇嗗埆鐨勫尯鍩燂紝澶辫触鏃舵墠鐢ㄥ厹搴曢粯璁ゅ€?
                     auto_region_bulk: str = str(scraped_data.get('region', bulk_reg))
                     detected_pc_bulk: str = str(scraped_data.get('postcode', ''))
-                    final_reg: str = auto_region_bulk if auto_region_bulk in ["中伦敦", "东伦敦", "西伦敦", "北伦敦", "南伦敦"] else bulk_reg
-                    pc_hint = f" [{detected_pc_bulk} → {final_reg}]" if detected_pc_bulk else f" [→ {final_reg}]"
-                    status_text.text(f"正在处理 ({i+1}/{len(urls)}){pc_hint}: {url}")
-                    # 生成海报
+                    final_reg: str = auto_region_bulk if auto_region_bulk in ["涓鸡鏁?, "涓滀鸡鏁?, "瑗夸鸡鏁?, "鍖椾鸡鏁?, "鍗椾鸡鏁?] else bulk_reg
+                    pc_hint = f" [{detected_pc_bulk} 鈫?{final_reg}]" if detected_pc_bulk else f" [鈫?{final_reg}]"
+                    status_text.text(f"姝ｅ湪澶勭悊 ({i+1}/{len(urls)}){pc_hint}: {url}")
+                    # 鐢熸垚娴锋姤
                     p_title: str = str(scraped_data.get('title', ''))
                     p_price: int = int(scraped_data.get('price', 0))
                     p_poster = create_poster(files_to_use, p_title, p_price, rooms_val, final_reg)
@@ -1461,63 +1231,63 @@ if ws:
                             p_poster.save(buf, format="JPEG", quality=90)
                             up_res = cloudinary.uploader.upload(buf.getvalue()) # type: ignore
                             img_url_cloud = up_res['secure_url']
-                            # AI 文案
+                            # AI 鏂囨
                             desc_val = scraped_data.get('description', '')
                             desc_str: str = str(desc_val)
                             p_station = str(scraped_data.get('station', ''))
                             p_lat = str(scraped_data.get('lat', ''))
                             p_lng = str(scraped_data.get('lng', ''))
-                            ai_copy = call_smart_ai(desc_str[:1000]) if desc_str else "最新豪宅首发，欢迎详询！"
-                            # 写入数据库
+                            ai_copy = call_smart_ai(desc_str[:1000]) if desc_str else "鏈€鏂拌豹瀹呴鍙戯紝娆㈣繋璇﹁锛?
+                            # 鍐欏叆鏁版嵁搴?
                             current_date = datetime.now().strftime("%Y-%m-%d")
                             ws.append_row([current_date, p_title, final_reg, rooms_val, p_price, img_url_cloud, ai_copy, 0, 0, p_station, "", p_lat, p_lng]) # type: ignore
                             success_count = success_count + 1
-                            st.success(f"✅ [{i+1}] {p_title} ({final_reg}) 发布成功！")
+                            st.success(f"鉁?[{i+1}] {p_title} ({final_reg}) 鍙戝竷鎴愬姛锛?)
                         except Exception as e:
-                            st.error(f"❌ [{i+1}] 上传出错: {e}")
+                            st.error(f"鉂?[{i+1}] 涓婁紶鍑洪敊: {e}")
                     else:
-                        st.warning(f"⚠️ 跳过 [{i+1}]：海报渲染失败")
+                        st.warning(f"鈿狅笍 璺宠繃 [{i+1}]锛氭捣鎶ユ覆鏌撳け璐?)
                     
                     progress_bar.progress((i + 1) / len(urls))
                 
-                status_text.success(f"🎉 全部完成！成功录入 {success_count} / {len(urls)} 套。去客户端看看吧！")
+                status_text.success(f"馃帀 鍏ㄩ儴瀹屾垚锛佹垚鍔熷綍鍏?{success_count} / {len(urls)} 濂椼€傚幓瀹㈡埛绔湅鐪嬪惂锛?)
 
     # =====================================================================
-    # TAB 4 — 🌐 多平台内容包
+    # TAB 4 鈥?馃寪 澶氬钩鍙板唴瀹瑰寘
     # =====================================================================
     with t4:
-        st.subheader("🌐 多平台内容包生成器")
-        st.info("💡 同一套房源，一键生成三个平台专属版本：小红书竖版 / 微信方版 / 抖音竖版，同时生成抖音口播脚本。")
+        st.subheader("馃寪 澶氬钩鍙板唴瀹瑰寘鐢熸垚鍣?)
+        st.info("馃挕 鍚屼竴濂楁埧婧愶紝涓€閿敓鎴愪笁涓钩鍙颁笓灞炵増鏈細灏忕孩涔︾珫鐗?/ 寰俊鏂圭増 / 鎶栭煶绔栫増锛屽悓鏃剁敓鎴愭姈闊冲彛鎾剼鏈€?)
 
-        mp_url = st.text_input("🔗 Rightmove 链接（可选，自动填入）", key="mp_url")
-        if st.button("🔍 读取房源", key="mp_fetch"):
+        mp_url = st.text_input("馃敆 Rightmove 閾炬帴锛堝彲閫夛紝鑷姩濉叆锛?, key="mp_url")
+        if st.button("馃攳 璇诲彇鎴挎簮", key="mp_fetch"):
             if mp_url:
-                with st.spinner("抓取中..."):
+                with st.spinner("鎶撳彇涓?.."):
                     mp_data, mp_err = scrape_rightmove(mp_url)
                     if mp_err:
                         st.error(mp_err)
                     else:
                         st.session_state['mp_data'] = mp_data
-                        st.success("✅ 读取成功！")
+                        st.success("鉁?璇诲彇鎴愬姛锛?)
 
         mpd = st.session_state.get('mp_data', {})
         mc1, mc2, mc3, mc4 = st.columns(4)
-        mp_name  = mc1.text_input("房源名称", value=mpd.get('title', ''), key="mp_name")
-        mp_price = mc2.number_input("月租 (£)", min_value=0, value=mpd.get('price', 0), key="mp_price")
-        mp_reg_opts = ["中伦敦", "东伦敦", "西伦敦", "北伦敦", "南伦敦"]
-        mp_auto_reg = mpd.get('region', '中伦敦')
-        mp_reg = mc3.selectbox("区域", mp_reg_opts,
+        mp_name  = mc1.text_input("鎴挎簮鍚嶇О", value=mpd.get('title', ''), key="mp_name")
+        mp_price = mc2.number_input("鏈堢 (拢)", min_value=0, value=mpd.get('price', 0), key="mp_price")
+        mp_reg_opts = ["涓鸡鏁?, "涓滀鸡鏁?, "瑗夸鸡鏁?, "鍖椾鸡鏁?, "鍗椾鸡鏁?]
+        mp_auto_reg = mpd.get('region', '涓鸡鏁?)
+        mp_reg = mc3.selectbox("鍖哄煙", mp_reg_opts,
                                index=mp_reg_opts.index(mp_auto_reg) if mp_auto_reg in mp_reg_opts else 0,
                                key="mp_reg")
-        mp_rm_opts = ["Studio", "1房", "2房", "3房", "4房+"]
+        mp_rm_opts = ["Studio", "1鎴?, "2鎴?, "3鎴?, "4鎴?"]
         mp_default_room = mpd.get('rooms', '')
-        mp_rooms = mc4.selectbox("户型", mp_rm_opts,
+        mp_rooms = mc4.selectbox("鎴峰瀷", mp_rm_opts,
                                  index=mp_rm_opts.index(mp_default_room) if mp_default_room in mp_rm_opts else 0,
                                  key="mp_rooms")
-        mp_desc = st.text_area("房源描述（用于生成口播文案）", value=mpd.get('description', ''), height=80, key="mp_desc")
-        mp_imgs = st.file_uploader("上传图片（建议 6-8 张）", accept_multiple_files=True, key="mp_files")
+        mp_desc = st.text_area("鎴挎簮鎻忚堪锛堢敤浜庣敓鎴愬彛鎾枃妗堬級", value=mpd.get('description', ''), height=80, key="mp_desc")
+        mp_imgs = st.file_uploader("涓婁紶鍥剧墖锛堝缓璁?6-8 寮狅級", accept_multiple_files=True, key="mp_files")
 
-        # 如果没有上传，从 Rightmove 抓取的图片自动使用
+        # 濡傛灉娌℃湁涓婁紶锛屼粠 Rightmove 鎶撳彇鐨勫浘鐗囪嚜鍔ㄤ娇鐢?
         mp_files_to_use = list(mp_imgs) if mp_imgs else []
         if not mp_files_to_use and mpd.get('images'):
             for img_url_item in mpd.get('images', []):
@@ -1527,13 +1297,13 @@ if ws:
                         mp_files_to_use.append(BytesIO(r_i.content))
                 except: pass
 
-        if st.button("🎨 生成三版海报 + 口播脚本", type="primary", key="mp_gen"):
+        if st.button("馃帹 鐢熸垚涓夌増娴锋姤 + 鍙ｆ挱鑴氭湰", type="primary", key="mp_gen"):
             if not mp_files_to_use:
-                st.warning("请先上传图片或读取 Rightmove 链接")
+                st.warning("璇峰厛涓婁紶鍥剧墖鎴栬鍙?Rightmove 閾炬帴")
             elif not mp_name:
-                st.warning("请填写房源名称")
+                st.warning("璇峰～鍐欐埧婧愬悕绉?)
             else:
-                with st.spinner("正在生成三个版本，稍等片刻..."):
+                with st.spinner("姝ｅ湪鐢熸垚涓変釜鐗堟湰锛岀◢绛夌墖鍒?.."):
                     p_xhs  = create_poster(mp_files_to_use, mp_name, mp_price, mp_rooms, mp_reg)
                     p_wc   = create_wechat_poster(mp_files_to_use, mp_name, mp_price, mp_rooms, mp_reg)
                     p_dy   = create_story_poster(mp_files_to_use, mp_name, mp_price, mp_rooms, mp_reg)
@@ -1542,150 +1312,150 @@ if ws:
                 if p_xhs and p_wc and p_dy:
                     st.session_state['mp_posters'] = (p_xhs, p_wc, p_dy)
                     st.session_state['mp_script'] = script
-                    st.success("✅ 三版海报生成完毕！")
+                    st.success("鉁?涓夌増娴锋姤鐢熸垚瀹屾瘯锛?)
 
         if 'mp_posters' in st.session_state:
             p_xhs, p_wc, p_dy = st.session_state['mp_posters']
             col_xhs, col_wc, col_dy = st.columns(3)
             with col_xhs:
-                st.markdown("**📱 小红书竖版** (1200×2350)")
+                st.markdown("**馃摫 灏忕孩涔︾珫鐗?* (1200脳2350)")
                 st.image(p_xhs, use_container_width=True)
                 buf_xhs = BytesIO()
                 p_xhs.save(buf_xhs, format="JPEG", quality=95)
-                st.download_button("⬇️ 下载小红书版", data=buf_xhs.getvalue(),
+                st.download_button("猬囷笍 涓嬭浇灏忕孩涔︾増", data=buf_xhs.getvalue(),
                                    file_name=f"xhs_{mp_name[:15]}.jpg", mime="image/jpeg", key="dl_xhs")
             with col_wc:
-                st.markdown("**💬 微信方版** (1080×1080)")
+                st.markdown("**馃挰 寰俊鏂圭増** (1080脳1080)")
                 st.image(p_wc, use_container_width=True)
                 buf_wc = BytesIO()
                 p_wc.save(buf_wc, format="JPEG", quality=95)
-                st.download_button("⬇️ 下载微信版", data=buf_wc.getvalue(),
+                st.download_button("猬囷笍 涓嬭浇寰俊鐗?, data=buf_wc.getvalue(),
                                    file_name=f"wechat_{mp_name[:15]}.jpg", mime="image/jpeg", key="dl_wc")
             with col_dy:
-                st.markdown("**🎬 抖音Story版** (1080×1920)")
+                st.markdown("**馃幀 鎶栭煶Story鐗?* (1080脳1920)")
                 st.image(p_dy, use_container_width=True)
                 buf_dy = BytesIO()
                 p_dy.save(buf_dy, format="JPEG", quality=95)
-                st.download_button("⬇️ 下载抖音版", data=buf_dy.getvalue(),
+                st.download_button("猬囷笍 涓嬭浇鎶栭煶鐗?, data=buf_dy.getvalue(),
                                    file_name=f"douyin_{mp_name[:15]}.jpg", mime="image/jpeg", key="dl_dy")
 
             st.markdown("---")
-            st.markdown("**🎙️ 抖音/小红书 15秒口播文案**")
-            st.text_area("复制后配合视频使用", value=st.session_state.get('mp_script', ''), height=160, key="mp_script_box")
+            st.markdown("**馃帣锔?鎶栭煶/灏忕孩涔?15绉掑彛鎾枃妗?*")
+            st.text_area("澶嶅埗鍚庨厤鍚堣棰戜娇鐢?, value=st.session_state.get('mp_script', ''), height=160, key="mp_script_box")
 
-            # 一键打包下载（ZIP）
+            # 涓€閿墦鍖呬笅杞斤紙ZIP锛?
             import zipfile
             zip_buf = BytesIO()
             with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
                 for label, buf in [("xhs", buf_xhs), ("wechat", buf_wc), ("douyin", buf_dy)]:
                     zf.writestr(f"{label}_{mp_name[:15]}.jpg", buf.getvalue())
                 zf.writestr("script.txt", st.session_state.get('mp_script', '').encode('utf-8'))
-            st.download_button("📦 一键下载全部（ZIP）", data=zip_buf.getvalue(),
+            st.download_button("馃摝 涓€閿笅杞藉叏閮紙ZIP锛?, data=zip_buf.getvalue(),
                                file_name=f"hao_harbour_{mp_name[:15]}.zip",
                                mime="application/zip", key="dl_zip")
 
 
     # =====================================================================
-    # TAB 5 — 👁️ 专业带看报告生成器
+    # TAB 5 鈥?馃憗锔?涓撲笟甯︾湅鎶ュ憡鐢熸垚鍣?
     # =====================================================================
     with t5:
-        st.subheader("👁️ 专业带看报告生成器 (Pro Viewing Report)")
-        st.info("填写深度测评信息，生成带星级评分的结构化报告及专业 PDF。")
+        st.subheader("馃憗锔?涓撲笟甯︾湅鎶ュ憡鐢熸垚鍣?(Pro Viewing Report)")
+        st.info("濉啓娣卞害娴嬭瘎淇℃伅锛岀敓鎴愬甫鏄熺骇璇勫垎鐨勭粨鏋勫寲鎶ュ憡鍙婁笓涓?PDF銆?)
 
-        # 1. 基础信息
-        st.markdown("#### 1️⃣ 基本信息")
+        # 1. 鍩虹淇℃伅
+        st.markdown("#### 1锔忊儯 鍩烘湰淇℃伅")
         vs_c1, vs_c2 = st.columns(2)
-        vs_client = vs_c1.text_input("👤 客户姓名", placeholder="例：王女士", key="vr_client")
-        vs_date = vs_c2.date_input("📅 看房日期", value=datetime.today(), key="vr_date")
+        vs_client = vs_c1.text_input("馃懁 瀹㈡埛濮撳悕", placeholder="渚嬶細鐜嬪コ澹?, key="vr_client")
+        vs_date = vs_c2.date_input("馃搮 鐪嬫埧鏃ユ湡", value=datetime.today(), key="vr_date")
         
-        vs_addr = st.text_input("🏠 房子地址", placeholder="例：Canary Wharf, E14", key="vr_addr")
-        vs_facing = st.text_input("🧭 房屋朝向", placeholder="例：坐北朝南 (South Facing)", key="vr_facing")
+        vs_addr = st.text_input("馃彔 鎴垮瓙鍦板潃", placeholder="渚嬶細Canary Wharf, E14", key="vr_addr")
+        vs_facing = st.text_input("馃Л 鎴垮眿鏈濆悜", placeholder="渚嬶細鍧愬寳鏈濆崡 (South Facing)", key="vr_facing")
         
-        st.write(f"📌 **固定展示联系方式**: 🟢 WeChat: {VIEWING_CONTACT_WECHAT} | 📞 Contact: {VIEWING_CONTACT_PHONE}")
+        st.write(f"馃搶 **鍥哄畾灞曠ず鑱旂郴鏂瑰紡**: 馃煝 WeChat: {VIEWING_CONTACT_WECHAT} | 馃摓 Contact: {VIEWING_CONTACT_PHONE}")
 
         st.markdown("---")
 
-        # 2. 三大核心评估板块
-        st.markdown("#### 2️⃣ 核心评估板块 (1-5 星评分)")
+        # 2. 涓夊ぇ鏍稿績璇勪及鏉垮潡
+        st.markdown("#### 2锔忊儯 鏍稿績璇勪及鏉垮潡 (1-5 鏄熻瘎鍒?")
         
         sections = {
-            'Interior': '🏠 室内深度评估 (Interior)',
-            'Building': '🏢 大楼管理评估 (Building)',
-            'Neighborhood': '🌳 周边微环境 (Neighborhood)'
+            'Interior': '馃彔 瀹ゅ唴娣卞害璇勪及 (Interior)',
+            'Building': '馃彚 澶фゼ绠＄悊璇勪及 (Building)',
+            'Neighborhood': '馃尦 鍛ㄨ竟寰幆澧?(Neighborhood)'
         }
         
         for section_key, section_label in sections.items():
             with st.expander(section_label, expanded=True):
-                # 动态增减项目
+                # 鍔ㄦ€佸鍑忛」鐩?
                 cols = st.columns([4, 3, 1])
-                cols[0].markdown("**项目名称**")
-                cols[1].markdown("**评分 (1-5 星)**")
+                cols[0].markdown("**椤圭洰鍚嶇О**")
+                cols[1].markdown("**璇勫垎 (1-5 鏄?**")
                 
-                # 获取当前板块的项目
+                # 鑾峰彇褰撳墠鏉垮潡鐨勯」鐩?
                 current_items = list(st.session_state['viewing_items'][section_key].items())
                 
                 for item_name, score in current_items:
                     r1, r2, r3 = st.columns([4, 3, 1])
                     r1.text(item_name)
-                    # 星级评分选择器
+                    # 鏄熺骇璇勫垎閫夋嫨鍣?
                     new_score = r2.select_slider(
                         f"Rating for {item_name}",
                         options=[1, 2, 3, 4, 5],
                         value=score,
-                        format_func=lambda x: "⭐" * x,
+                        format_func=lambda x: "猸? * x,
                         key=f"score_{section_key}_{item_name}",
                         label_visibility="collapsed"
                     )
                     st.session_state['viewing_items'][section_key][item_name] = new_score
                     
-                    if r3.button("🗑️", key=f"del_{section_key}_{item_name}"):
+                    if r3.button("馃棏锔?, key=f"del_{section_key}_{item_name}"):
                         del st.session_state['viewing_items'][section_key][item_name]
                         st.rerun()
                 
-                # 添加新项目
+                # 娣诲姞鏂伴」鐩?
                 with st.container():
                     a1, a2 = st.columns([5, 1])
-                    new_item_name = a1.text_input(f"添加新项目到 {section_key}", key=f"add_input_{section_key}", label_visibility="collapsed", placeholder="输入项目名称...")
-                    if a2.button("➕", key=f"add_btn_{section_key}"):
+                    new_item_name = a1.text_input(f"娣诲姞鏂伴」鐩埌 {section_key}", key=f"add_input_{section_key}", label_visibility="collapsed", placeholder="杈撳叆椤圭洰鍚嶇О...")
+                    if a2.button("鉃?, key=f"add_btn_{section_key}"):
                         if new_item_name:
                             st.session_state['viewing_items'][section_key][new_item_name] = 5
                             st.rerun()
                 
-                st.session_state['viewing_remarks'][section_key] = st.text_area(f"【{section_key}】额外备注", value=st.session_state['viewing_remarks'][section_key], placeholder="输入该板块的补充说明...", key=f"rem_{section_key}")
+                st.session_state['viewing_remarks'][section_key] = st.text_area(f"銆恵section_key}銆戦澶栧娉?, value=st.session_state['viewing_remarks'][section_key], placeholder="杈撳叆璇ユ澘鍧楃殑琛ュ厖璇存槑...", key=f"rem_{section_key}")
 
         st.markdown("---")
         
-        # 3. 照片管理
-        st.markdown("#### 3️⃣ 现场照片管理")
-        uploaded_photos = st.file_uploader("上传现场照片 (支持多选)", type=['png', 'jpg', 'jpeg'], accept_multiple_files=True)
+        # 3. 鐓х墖绠＄悊
+        st.markdown("#### 3锔忊儯 鐜板満鐓х墖绠＄悊")
+        uploaded_photos = st.file_uploader("涓婁紶鐜板満鐓х墖 (鏀寔澶氶€?", type=['png', 'jpg', 'jpeg'], accept_multiple_files=True)
         if uploaded_photos:
-            # 将新上传的照片合并（避免重复）
+            # 灏嗘柊涓婁紶鐨勭収鐗囧悎骞讹紙閬垮厤閲嶅锛?
             for up in uploaded_photos:
                 if up not in st.session_state['viewing_photos']:
                     st.session_state['viewing_photos'].append(up)
 
         if st.session_state['viewing_photos']:
-            st.write("📸 已上传照片预览:")
+            st.write("馃摳 宸蹭笂浼犵収鐗囬瑙?")
             pcols = st.columns(4)
             for i, p in enumerate(st.session_state['viewing_photos']):
                 with pcols[i % 4]:
                     st.image(p, use_container_width=True)
-                    if st.button("删除", key=f"del_photo_{i}"):
+                    if st.button("鍒犻櫎", key=f"del_photo_{i}"):
                         st.session_state['viewing_photos'].pop(i)
                         st.rerun()
 
         st.markdown("---")
         
-        # 4. 总体评价与生成
-        st.markdown("#### 4️⃣ 总体评价 & 导出报告")
-        st.session_state['viewing_remarks']['General'] = st.text_area("✍️ 总体评价 (General Remarks)", value=st.session_state['viewing_remarks']['General'], height=100)
+        # 4. 鎬讳綋璇勪环涓庣敓鎴?
+        st.markdown("#### 4锔忊儯 鎬讳綋璇勪环 & 瀵煎嚭鎶ュ憡")
+        st.session_state['viewing_remarks']['General'] = st.text_area("鉁嶏笍 鎬讳綋璇勪环 (General Remarks)", value=st.session_state['viewing_remarks']['General'], height=100)
         
-        st.warning(f"📄 **免责声明将自动包含在报告中**:\n{VIEWING_DISCLAIMER}")
+        st.warning(f"馃搫 **鍏嶈矗澹版槑灏嗚嚜鍔ㄥ寘鍚湪鎶ュ憡涓?*:\n{VIEWING_DISCLAIMER}")
 
         c_g1, c_g2 = st.columns(2)
-        if c_g1.button("📝 生成带看小结 (文字版)", type="primary", use_container_width=True):
+        if c_g1.button("馃摑 鐢熸垚甯︾湅灏忕粨 (鏂囧瓧鐗?", type="primary", use_container_width=True):
             if not vs_client or not vs_addr:
-                st.error("请至少填写客户姓名和地址")
+                st.error("璇疯嚦灏戝～鍐欏鎴峰鍚嶅拰鍦板潃")
             else:
                 summary_text = gen_pro_viewing_summary(
                     vs_client, str(vs_date), vs_addr, vs_facing,
@@ -1694,11 +1464,11 @@ if ws:
                 )
                 st.session_state['vr_summary_output'] = summary_text
 
-        if c_g2.button("🎨 生成专业 PDF 报告", use_container_width=True):
+        if c_g2.button("馃帹 鐢熸垚涓撲笟 PDF 鎶ュ憡", use_container_width=True):
             if not vs_client or not vs_addr:
-                st.error("请至少填写客户姓名和地址")
+                st.error("璇疯嚦灏戝～鍐欏鎴峰鍚嶅拰鍦板潃")
             else:
-                with st.spinner("正在排版并生成 PDF..."):
+                with st.spinner("姝ｅ湪鎺掔増骞剁敓鎴?PDF..."):
                     pdf_canvas = create_viewing_report_pdf(
                         vs_client, str(vs_date), vs_addr, vs_facing,
                         st.session_state['viewing_items'],
@@ -1708,165 +1478,165 @@ if ws:
                     st.session_state['vr_pdf_output'] = pdf_canvas
 
         if 'vr_summary_output' in st.session_state:
-            st.markdown("### 📄 文字版小结")
-            st.text_area("复制发给客户:", value=st.session_state['vr_summary_output'], height=400)
+            st.markdown("### 馃搫 鏂囧瓧鐗堝皬缁?)
+            st.text_area("澶嶅埗鍙戠粰瀹㈡埛:", value=st.session_state['vr_summary_output'], height=400)
         
         if 'vr_pdf_output' in st.session_state:
-            st.markdown("### 🖼️ PDF 报告预览")
-            st.image(st.session_state['vr_pdf_output'], caption="这就是最终生成的 PDF 布局预览", use_container_width=True)
+            st.markdown("### 馃柤锔?PDF 鎶ュ憡棰勮")
+            st.image(st.session_state['vr_pdf_output'], caption="杩欏氨鏄渶缁堢敓鎴愮殑 PDF 甯冨眬棰勮", use_container_width=True)
             
-            # 提供下载
+            # 鎻愪緵涓嬭浇
             buf_pdf = BytesIO()
             st.session_state['vr_pdf_output'].save(buf_pdf, format="PDF", resolution=100.0)
             st.download_button(
-                "⬇️ 立即下载 PDF 报告",
+                "猬囷笍 绔嬪嵆涓嬭浇 PDF 鎶ュ憡",
                 data=buf_pdf.getvalue(),
                 file_name=f"Viewing_Report_{vs_client}_{vs_date}.pdf",
                 mime="application/pdf"
             )
 
     # =====================================================================
-    # TAB 6 — 📊 房源对比 + 市场简报
+    # TAB 6 鈥?馃搳 鎴挎簮瀵规瘮 + 甯傚満绠€鎶?
     # =====================================================================
     with t6:
-        st.subheader("📊 房源对比 & 市场简报")
+        st.subheader("馃搳 鎴挎簮瀵规瘮 & 甯傚満绠€鎶?)
         
-        st.markdown("#### 1️⃣ 房源横向对比")
+        st.markdown("#### 1锔忊儯 鎴挎簮妯悜瀵规瘮")
         all_props = get_safe_records(ws)
         if all_props:
-            titles = [f"{r['title']} (£{r['price']})" for r in all_props]
-            selected_names = st.multiselect("选择需要对比的房源 (最多4个)", options=titles, max_selections=4)
+            titles = [f"{r['title']} (拢{r['price']})" for r in all_props]
+            selected_names = st.multiselect("閫夋嫨闇€瑕佸姣旂殑鎴挎簮 (鏈€澶?涓?", options=titles, max_selections=4)
             
-            if st.button("🖼️ 生成对比长图", key="comp_gen"):
+            if st.button("馃柤锔?鐢熸垚瀵规瘮闀垮浘", key="comp_gen"):
                 if selected_names:
-                    selected_data = [r for r in all_props if f"{r['title']} (£{r['price']})" in selected_names]
+                    selected_data = [r for r in all_props if f"{r['title']} (拢{r['price']})" in selected_names]
                     comp_img = gen_comparison_image(selected_data)
                     st.image(comp_img, use_container_width=True)
                     
                     buf_comp = BytesIO()
                     comp_img.save(buf_comp, format="JPEG")
-                    st.download_button("⬇️ 下载对比图", data=buf_comp.getvalue(), 
+                    st.download_button("猬囷笍 涓嬭浇瀵规瘮鍥?, data=buf_comp.getvalue(), 
                                        file_name="comparison.jpg", mime="image/jpeg")
                 else:
-                    st.warning("请至少选择一个房源")
+                    st.warning("璇疯嚦灏戦€夋嫨涓€涓埧婧?)
 
         st.markdown("---")
-        st.markdown("#### 2️⃣ 伦敦租赁市场走势 (Google Trends)")
-        kw = st.text_input("输入关键词研究热度", value="London Property")
-        if st.button("📈 获取趋势数据"):
-            with st.spinner("从 Google 获取数据中..."):
+        st.markdown("#### 2锔忊儯 浼︽暒绉熻祦甯傚満璧板娍 (Google Trends)")
+        kw = st.text_input("杈撳叆鍏抽敭璇嶇爺绌剁儹搴?, value="London Property")
+        if st.button("馃搱 鑾峰彇瓒嬪娍鏁版嵁"):
+            with st.spinner("浠?Google 鑾峰彇鏁版嵁涓?.."):
                 trend_df = get_market_trends(kw)
                 if trend_df is not None and not trend_df.empty:
                     st.line_chart(trend_df[kw])
-                    st.caption(f"过去三个月 '{kw}' 在大伦敦地区的搜索热度趋势")
+                    st.caption(f"杩囧幓涓変釜鏈?'{kw}' 鍦ㄥぇ浼︽暒鍦板尯鐨勬悳绱㈢儹搴﹁秼鍔?)
                 else:
-                    st.info("💡 环境未配置 Pytrends 驱动或访问受限。请确保服务器具备代理或海外环境。")
+                    st.info("馃挕 鐜鏈厤缃?Pytrends 椹卞姩鎴栬闂彈闄愩€傝纭繚鏈嶅姟鍣ㄥ叿澶囦唬鐞嗘垨娴峰鐜銆?)
 
     # =====================================================================
-    # TAB 7 — 🧰 工具箱（合同提取 + 爆款关键词）
+    # TAB 7 鈥?馃О 宸ュ叿绠憋紙鍚堝悓鎻愬彇 + 鐖嗘鍏抽敭璇嶏級
     # =====================================================================
     with t7:
-        st.subheader("🧰 让效率翻倍的工具箱")
+        st.subheader("馃О 璁╂晥鐜囩炕鍊嶇殑宸ュ叿绠?)
         
         tc1, tc2 = st.columns(2)
         
         with tc1:
-            st.markdown("#### 📄 合同关键信息智能提取")
-            st.info("上传 PDF 合同，AI 将自动分析核心条款及潜在风险。")
-            contract_file = st.file_uploader("点击上传 PDF 合同", type="pdf")
-            v3_lang = st.radio("希望分析出的语言 (Language)", ["中文", "English"], horizontal=True)
+            st.markdown("#### 馃搫 鍚堝悓鍏抽敭淇℃伅鏅鸿兘鎻愬彇")
+            st.info("涓婁紶 PDF 鍚堝悓锛孉I 灏嗚嚜鍔ㄥ垎鏋愭牳蹇冩潯娆惧強娼滃湪椋庨櫓銆?)
+            contract_file = st.file_uploader("鐐瑰嚮涓婁紶 PDF 鍚堝悓", type="pdf")
+            v3_lang = st.radio("甯屾湜鍒嗘瀽鍑虹殑璇█ (Language)", ["涓枃", "English"], horizontal=True)
 
-            if st.button("🧠 开始全合同深度解析 (Deep Dive 3.0)", type="primary"):
+            if st.button("馃 寮€濮嬪叏鍚堝悓娣卞害瑙ｆ瀽 (Deep Dive 3.0)", type="primary"):
                 if contract_file:
-                    with st.spinner("AI 正在逐章节阅读并提取核心条款 (约60-90秒)..."):
+                    with st.spinner("AI 姝ｅ湪閫愮珷鑺傞槄璇诲苟鎻愬彇鏍稿績鏉℃ (绾?0-90绉?..."):
                         res = extract_contract_pro(contract_file, target_lang=v3_lang)
                         if "error" in res:
                             st.error(res["error"])
                         else:
-                            # 存储 Deep Dive 数据结构
+                            # 瀛樺偍 Deep Dive 鏁版嵁缁撴瀯
                             st.session_state['contract_v3'] = res
                             st.session_state['contract_v3_lang'] = v3_lang
                 else:
-                    st.warning("请先上传文件")
+                    st.warning("璇峰厛涓婁紶鏂囦欢")
 
             if 'contract_v3' in st.session_state:
                 st.markdown("---")
-                st.subheader("📋 合同深度解析预览 (可编辑)")
-                st.info("💡 每项内容均可点击修改。如果 AI 漏掉了某些章节，您可以手动添加。")
+                st.subheader("馃搵 鍚堝悓娣卞害瑙ｆ瀽棰勮 (鍙紪杈?")
+                st.info("馃挕 姣忛」鍐呭鍧囧彲鐐瑰嚮淇敼銆傚鏋?AI 婕忔帀浜嗘煇浜涚珷鑺傦紝鎮ㄥ彲浠ユ墜鍔ㄦ坊鍔犮€?)
                 
                 v3 = st.session_state['contract_v3']
                 meta = v3.get('Metadata', {})
                 sections = v3.get('Sections', [])
 
-                # 1. 核心元数据编辑
-                with st.expander("📌 1. 核心条款 (Metadata)", expanded=True):
+                # 1. 鏍稿績鍏冩暟鎹紪杈?
+                with st.expander("馃搶 1. 鏍稿績鏉℃ (Metadata)", expanded=True):
                     m1, m2 = st.columns(2)
-                    meta['Landlord'] = m1.text_input("房东 (Landlord)", meta.get('Landlord',''))
-                    meta['Tenant'] = m2.text_input("租客 (Tenant)", meta.get('Tenant',''))
-                    meta['Address'] = st.text_input("房屋地址", meta.get('Address',''))
+                    meta['Landlord'] = m1.text_input("鎴夸笢 (Landlord)", meta.get('Landlord',''))
+                    meta['Tenant'] = m2.text_input("绉熷 (Tenant)", meta.get('Tenant',''))
+                    meta['Address'] = st.text_input("鎴垮眿鍦板潃", meta.get('Address',''))
                     
                     d1, d2, d3 = st.columns(3)
-                    meta['StartDate'] = d1.text_input("🏠 起租日期 (Starting Date)", meta.get('StartDate',''))
-                    meta['EndDate'] = d2.text_input("终止日期 (End Date)", meta.get('EndDate',''))
-                    meta['Term'] = d3.text_input("租期时长 (Term)", meta.get('Term',''))
+                    meta['StartDate'] = d1.text_input("馃彔 璧风鏃ユ湡 (Starting Date)", meta.get('StartDate',''))
+                    meta['EndDate'] = d2.text_input("缁堟鏃ユ湡 (End Date)", meta.get('EndDate',''))
+                    meta['Term'] = d3.text_input("绉熸湡鏃堕暱 (Term)", meta.get('Term',''))
                     
                     p1, p2, p3 = st.columns(3)
-                    meta['RentPCM'] = p1.text_input("月租 (Rent PCM)", meta.get('RentPCM',''))
-                    meta['Deposit'] = p2.text_input("押金 (Deposit)", meta.get('Deposit',''))
-                    meta['BreakClause'] = p3.text_input("解约条款 (Break Clause)", meta.get('BreakClause',''))
+                    meta['RentPCM'] = p1.text_input("鏈堢 (Rent PCM)", meta.get('RentPCM',''))
+                    meta['Deposit'] = p2.text_input("鎶奸噾 (Deposit)", meta.get('Deposit',''))
+                    meta['BreakClause'] = p3.text_input("瑙ｇ害鏉℃ (Break Clause)", meta.get('BreakClause',''))
 
-                # 2. 动态章节编辑
-                st.markdown("#### 📖 逐章节深度摘要 (Clause Breakdown)")
+                # 2. 鍔ㄦ€佺珷鑺傜紪杈?
+                st.markdown("#### 馃摉 閫愮珷鑺傛繁搴︽憳瑕?(Clause Breakdown)")
                 new_sections = []
                 for i, sec in enumerate(sections):
-                    with st.expander(f"📍 {sec.get('Heading', '未命名章节')}", expanded=True):
-                        h_val = st.text_input(f"章节标题", sec.get('Heading',''), key=f"h_{i}")
-                        c_val = st.text_area(f"章节要点总结", sec.get('Content',''), height=150, key=f"c_{i}")
-                        if st.button(f"🗑️ 删除此章节", key=f"rem_{i}"):
-                            # 标记删除逻辑（通过不加入 new_sections 实现）
+                    with st.expander(f"馃搷 {sec.get('Heading', '鏈懡鍚嶇珷鑺?)}", expanded=True):
+                        h_val = st.text_input(f"绔犺妭鏍囬", sec.get('Heading',''), key=f"h_{i}")
+                        c_val = st.text_area(f"绔犺妭瑕佺偣鎬荤粨", sec.get('Content',''), height=150, key=f"c_{i}")
+                        if st.button(f"馃棏锔?鍒犻櫎姝ょ珷鑺?, key=f"rem_{i}"):
+                            # 鏍囪鍒犻櫎閫昏緫锛堥€氳繃涓嶅姞鍏?new_sections 瀹炵幇锛?
                             continue
                         new_sections.append({"Heading": h_val, "Content": c_val})
                 
-                # 添加新章节功能
-                if st.button("➕ 添加一处自定义章节/备注"):
-                    new_sections.append({"Heading": "自定义条款", "Content": ""})
+                # 娣诲姞鏂扮珷鑺傚姛鑳?
+                if st.button("鉃?娣诲姞涓€澶勮嚜瀹氫箟绔犺妭/澶囨敞"):
+                    new_sections.append({"Heading": "鑷畾涔夋潯娆?, "Content": ""})
                 
                 v3['Sections'] = new_sections
 
-                # 3. 风险与总结
-                with st.expander("⚠️ 风险提示与核心总结", expanded=True):
-                    v3['Risks'] = st.text_area("潜在风险点", v3.get('Risks',''), height=100)
-                    v3['Summary'] = st.text_area("全篇总结", v3.get('Summary',''), height=80)
+                # 3. 椋庨櫓涓庢€荤粨
+                with st.expander("鈿狅笍 椋庨櫓鎻愮ず涓庢牳蹇冩€荤粨", expanded=True):
+                    v3['Risks'] = st.text_area("娼滃湪椋庨櫓鐐?, v3.get('Risks',''), height=100)
+                    v3['Summary'] = st.text_area("鍏ㄧ瘒鎬荤粨", v3.get('Summary',''), height=80)
 
                 st.markdown("---")
-                if st.button("🎨 导出全合同深度分析 PDF", key="v3_pdf_gen", use_container_width=True):
-                    with st.spinner("正在排版长篇报告 PDF (含水印)..."):
-                        p_img = create_contract_analysis_pdf(v3, lang=st.session_state.get('contract_v3_lang', '中文'))
+                if st.button("馃帹 瀵煎嚭鍏ㄥ悎鍚屾繁搴﹀垎鏋?PDF", key="v3_pdf_gen", use_container_width=True):
+                    with st.spinner("姝ｅ湪鎺掔増闀跨瘒鎶ュ憡 PDF (鍚按鍗?..."):
+                        p_img = create_contract_analysis_pdf(v3, lang=st.session_state.get('contract_v3_lang', '涓枃'))
                         buf_v3 = BytesIO()
                         p_img.save(buf_v3, format="PDF", resolution=100.0)
-                        st.download_button("⬇️ 立即下载深度报告 PDF", data=buf_v3.getvalue(), 
+                        st.download_button("猬囷笍 绔嬪嵆涓嬭浇娣卞害鎶ュ憡 PDF", data=buf_v3.getvalue(), 
                                            file_name=f"Full_Contract_Report_{datetime.now().strftime('%Y%m%d')}.pdf", 
                                            mime="application/pdf", key="dl_v3_pdf")
 
         with tc2:
-            st.markdown("#### 📱 小红书爆款优化器")
-            st.info("根据当前趋势，给出最适合伦敦房产的标题模板与哈希标签。")
-            topic = st.selectbox("核心话题", ["新盘推介", "租房避坑", "区域测评", "搬家攻略"])
+            st.markdown("#### 馃摫 灏忕孩涔︾垎娆句紭鍖栧櫒")
+            st.info("鏍规嵁褰撳墠瓒嬪娍锛岀粰鍑烘渶閫傚悎浼︽暒鎴夸骇鐨勬爣棰樻ā鏉夸笌鍝堝笇鏍囩銆?)
+            topic = st.selectbox("鏍稿績璇濋", ["鏂扮洏鎺ㄤ粙", "绉熸埧閬垮潙", "鍖哄煙娴嬭瘎", "鎼鏀荤暐"])
             
-            # 模拟爆款库
+            # 妯℃嫙鐖嗘搴?
             templates = {
-                "新盘推介": ["被问爆了！伦敦{region}这个宝藏新盘终于开盘了😭", "伦敦租房｜这可能是{region}性价比的天花板了✨", "[寻房记] 住进这里，每天都被伦敦的阳光叫醒"],
-                "租房避坑": ["救命！伦敦租房这5个坑千万别踩❌", "伦敦租房避雷指南：学长学姐带血的教训", "新手必看！伦敦租房合同里藏着的“猫腻”"],
-                "区域测评": ["住在{region}是种什么体验？", "伦敦区域测评｜{region}真的值得住吗？", "大数据请把这个视频推给想住{region}的朋友！"]
+                "鏂扮洏鎺ㄤ粙": ["琚棶鐖嗕簡锛佷鸡鏁region}杩欎釜瀹濊棌鏂扮洏缁堜簬寮€鐩樹簡馃槶", "浼︽暒绉熸埧锝滆繖鍙兘鏄瘂region}鎬т环姣旂殑澶╄姳鏉夸簡鉁?, "[瀵绘埧璁癩 浣忚繘杩欓噷锛屾瘡澶╅兘琚鸡鏁︾殑闃冲厜鍙啋"],
+                "绉熸埧閬垮潙": ["鏁戝懡锛佷鸡鏁︾鎴胯繖5涓潙鍗冧竾鍒俯鉂?, "浼︽暒绉熸埧閬块浄鎸囧崡锛氬闀垮濮愬甫琛€鐨勬暀璁?, "鏂版墜蹇呯湅锛佷鸡鏁︾鎴垮悎鍚岄噷钘忕潃鐨勨€滅尗鑵烩€?],
+                "鍖哄煙娴嬭瘎": ["浣忓湪{region}鏄浠€涔堜綋楠岋紵", "浼︽暒鍖哄煙娴嬭瘎锝渰region}鐪熺殑鍊煎緱浣忓悧锛?, "澶ф暟鎹鎶婅繖涓棰戞帹缁欐兂浣弡region}鐨勬湅鍙嬶紒"]
             }
             
-            p_reg_name = st.text_input("填入关键词(如区域名)", value="Canary Wharf")
-            if st.button("✨ 随机生成爆款文案建议"):
-                st.markdown("**🔥 推荐标题:**")
+            p_reg_name = st.text_input("濉叆鍏抽敭璇?濡傚尯鍩熷悕)", value="Canary Wharf")
+            if st.button("鉁?闅忔満鐢熸垚鐖嗘鏂囨寤鸿"):
+                st.markdown("**馃敟 鎺ㄨ崘鏍囬:**")
                 for t in templates.get(topic, []):
                     st.code(t.replace("{region}", p_reg_name))
-                st.markdown("**🏷️ 推荐标签:**")
-                st.write("#伦敦租房 #英国留学 #伦敦生活 #伦敦生活方式 #伦敦找房 #HaoHarbour")
+                st.markdown("**馃彿锔?鎺ㄨ崘鏍囩:**")
+                st.write("#浼︽暒绉熸埧 #鑻卞浗鐣欏 #浼︽暒鐢熸椿 #浼︽暒鐢熸椿鏂瑰紡 #浼︽暒鎵炬埧 #HaoHarbour")
 
 # --- End of Admin Tool ---
 
