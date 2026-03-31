@@ -46,9 +46,13 @@ VIEWING_DEFAULT_NEIGHBORHOOD = [
 ]
 
 # --- 1. 初始化配置 ---
-# ⚠️ set_page_config 必须是第一个 Streamlit 命令
-st.set_page_config(page_title="Hao Harbour Admin", layout="wide")
+cloudinary.config(
+    cloud_name = st.secrets["cloudinary"]["cloud_name"],
+    api_key = st.secrets["cloudinary"]["api_key"],
+    api_secret = st.secrets["cloudinary"]["api_secret"]
+)
 
+st.set_page_config(page_title="Hao Harbour Admin", layout="wide")
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;} footer {visibility: hidden;}
@@ -57,12 +61,6 @@ st.markdown("""
     .stButton>button {width: 100%; background-color: #bfa064; color: white; font-weight: bold;}
     </style>
 """, unsafe_allow_html=True)
-
-cloudinary.config(
-    cloud_name = st.secrets["cloudinary"]["cloud_name"],
-    api_key = st.secrets["cloudinary"]["api_key"],
-    api_secret = st.secrets["cloudinary"]["api_secret"]
-)
 
 # --- 2. 数据库连接 ---
 def get_ws():
@@ -698,113 +696,77 @@ def extract_contract_pro(pdf_file, target_lang="中文") -> Dict[str, Any]:
             f"要求：\n"
             f"1. 务必提取基础元数据：房东、租客、房屋地址、月租(Rent PCM)、押金(Deposit)、起租日期(Starting Date/Commencement Date)、终止日期、租期时长、解约条款(Break Clause)。\n"
             f"2. 除了元数据，请识别合同中的每个大模块（如 Tenant's Obligation, Landlord's Covenants, End of Tenancy, Special Clauses 等）。\n"
-            f"3. 对每个模块进行深度的�    for s in data.get('Sections', []):
-        sections.append({
-            "Heading": sanitize_text(s.get('Heading', '')),
-            "Content": sanitize_text(s.get('Content', ''))
-        })
-    
-    risks_txt = sanitize_text(data.get('Risks', ''))
-    summary_txt = sanitize_text(data.get('Summary', ''))
-    
-    # 动态高度计算重构
-    y_ptr = 450 
-    # Metadata: 预估高度 (3个 Full Row + 3个 Grid Row)
-    y_ptr += 3 * 120 # Metadata Full Rows
-    y_ptr += 3 * 100 # Metadata Grid Rows
-    
-    for s in sections:
-        y_ptr += 120 # Padding/Header
-        lines = get_lines(s["Content"], f_body, 1020)
-        y_ptr += len(lines) * 45 + 80
-    
-    y_ptr += 250 + len(get_lines(risks_txt, f_body, 1020)) * 45
-    y_ptr += 150 + len(get_lines(summary_txt, f_body, 1020)) * 45
-    
-    total_est_height = y_ptr + 800
-    
-    canvas = Image.new('RGB', (1200, int(total_est_height)), (255, 255, 255))
-    draw = ImageDraw.Draw(canvas)
-    
-    def draw_wrapped_text(draw, text, x, y, font, max_width, fill=(60, 60, 60), line_h=1.5):
-        lines = get_lines(text, font, max_width)
-        for line in lines:
-            draw.text((x, y), line, font=font, fill=fill)
-            y += int(font.size * line_h)
-        return y
+            f"3. 对每个模块进行深度的摘要，提炼出关键义务、权利、费用、日期与风险点。\n"
+            f"4. 请特别关注对租客不利的条款或风险（如 unusual break clause terms, high deposit, tenant liability for repairs 等）。\n"
+            f"5. 最终输出格式为 JSON，包含以下字段： Metadata (dict), Sections (list of {{Heading, Content}}), Risks (str), Summary (str)。\n"
+            f"{lang_instruction}"
+        )
+        r = requests.post("https://api.deepseek.com/chat/completions",
+            json={"model": "deepseek-chat", "messages": [
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": text[:12000]}
+            ]},
+            headers={"Authorization": f"Bearer {api_key}"}, timeout=90)
+        raw_json = r.json()['choices'][0]['message']['content']
+        data = parse_ai_json(raw_json)
+        if not data: return {"error": "⚠️ AI 返回的数据无法解析，请重试。"}
+        return data
+    except Exception as e:
+        return {"error": f"提取失败: {e}"}
 
-    def draw_meta_row_full(draw, y, label, val, font_label, font_val):
-        draw.text((80, y), f"{label}:", font=font_label, fill=(130, 130, 130))
-        y += 40
-        # 值加粗/深色，并从缩进处开始
-        new_y = draw_wrapped_text(draw, val, 100, y, font_val, 1020, fill=(30, 30, 30), line_h=1.4)
-        return max(y + 60, new_y + 30)
 
-    def draw_meta_grid(draw, y, l1, v1, l2, v2, font_label, font_val):
-        # 左列: 限制宽度防止溢出到右列
-        draw.text((80, y), f"{l1}:", font=font_label, fill=(130, 130, 130))
-        draw_wrapped_text(draw, str(v1), 80, y + 35, font_val, 480, fill=(30, 30, 30), line_h=1.3)
-        # 右列
-        draw.text((600, y), f"{l2}:", font=font_label, fill=(130, 130, 130))
-        draw_wrapped_text(draw, str(v2), 600, y + 35, font_val, 520, fill=(30, 30, 30), line_h=1.3)
-        return y + 115
+def create_contract_analysis_pdf(data: Dict, lang: str = "中文") -> Image.Image:
+    """生成合同深度分析 PDF 长图（Deep Dive 3.0 Report）"""
+    # 语言包
+    L = {
+        "中文": {
+            "Title": "合同深度分析报告 | Hao Harbour Intelligence",
+            "MetaTitle": "📌 核心条款",
+            "Landlord": "房东", "Tenant": "租客", "Address": "房屋地址",
+            "Rent": "月租 (PCM)", "Deposit": "押金",
+            "StartDate": "起租日期", "EndDate": "终止日期",
+            "Term": "租期", "Break": "解约条款",
+            "RiskTitle": "⚠️ 潜在风险提示",
+            "RiskDefault": "AI 未识别到明显高风险条款，但建议签约前务必自行核实。",
+            "SummaryTitle": "📝 全篇总结",
+            "Disclaimer": "本报告由 AI 辅助生成，仅供参考，不构成法律建议。请在签约前咨询专业律师。Hao Harbour 对报告内容的准确性不承担法律责任。",
+        },
+        "English": {
+            "Title": "Contract Analysis Report | Hao Harbour Intelligence",
+            "MetaTitle": "📌 Key Terms",
+            "Landlord": "Landlord", "Tenant": "Tenant", "Address": "Property Address",
+            "Rent": "Rent (PCM)", "Deposit": "Deposit",
+            "StartDate": "Start Date", "EndDate": "End Date",
+            "Term": "Term", "Break": "Break Clause",
+            "RiskTitle": "⚠️ Risk Highlights",
+            "RiskDefault": "No major risks flagged by AI. Please verify all terms before signing.",
+            "SummaryTitle": "📝 Summary",
+            "Disclaimer": "This report is AI-assisted and for reference only. It does not constitute legal advice. Please consult a qualified solicitor before signing. Hao Harbour accepts no legal liability for its accuracy.",
+        }
+    }.get(lang, {})
+    if not L:
+        L = {"Title": "Contract Report", "MetaTitle": "Key Terms",
+             "Landlord": "Landlord", "Tenant": "Tenant", "Address": "Address",
+             "Rent": "Rent", "Deposit": "Deposit", "StartDate": "Start",
+             "EndDate": "End", "Term": "Term", "Break": "Break Clause",
+             "RiskTitle": "Risks", "RiskDefault": "None identified.",
+             "SummaryTitle": "Summary", "Disclaimer": "For reference only."}
 
-    # 1. 页眉 Banner (高级深灰)
-    draw.rectangle([(0, 0), (1200, 180)], fill=(35, 35, 35))
-    
-    # 动态居中/安全渲染标题
-    report_title = L["Title"]
-    title_w = _dummy_draw.textlength(report_title, font=f_banner)
-    if title_w > 1080: # 如果太长，尝试缩小字号或强制居中
-        # 简单修正：字号已根据长度缩放，这里额外确保居中且不溢出
-        draw_wrapped_text(draw, report_title, 60, 50, f_banner, 1080, fill=(191, 160, 100), line_h=1.2)
-    else:
-        # 居中渲染
-        title_x = (1200 - title_w) // 2
-        draw.text((title_x, 55), report_title, font=f_banner, fill=(191, 160, 100))
-    
-    y = 240
-    # 2. 基础财务 & 关键日期 (精品网格布局)
-    draw.text((60, y), L["MetaTitle"], font=f_section, fill=(191, 160, 100))
-    y += 100
-    # 房东、租客、地址 通常较长，始终占全行
-    y = draw_meta_row_full(draw, y, L["Landlord"], meta.get('Landlord', 'N/A'), f_label, f_body)
-    y = draw_meta_row_full(draw, y, L["Tenant"], meta.get('Tenant', 'N/A'), f_label, f_body)
-    y = draw_meta_row_full(draw, y, L["Address"], meta.get('Address', 'N/A'), f_label, f_body)
-    
-    # 金额与日期 较短，可以使用网格
-    y = draw_meta_grid(draw, y, L["Rent"], meta.get('RentPCM', 'N/A'), L["Deposit"], meta.get('Deposit', 'N/A'), f_label, f_body)
-    y = draw_meta_grid(draw, y, L["StartDate"], meta.get('StartDate', 'N/A'), L["EndDate"], meta.get('EndDate', 'N/A'), f_label, f_body)
-    # Term 和 Break Clause 尤其后者可能很长，虽然放网格但需小心 (这里强制 BreakClause 为 Full Row)
-    y = draw_meta_grid(draw, y, L["Term"], meta.get('Term', 'N/A'), "...", "...", f_label, f_body)
-    y = draw_meta_row_full(draw, y, L["Break"], meta.get('BreakClause', 'N/A'), f_label, f_body)
-    
-    y += 80
-    # 3. 逐章节核心分析 (Premium Card Layout)
-    for s in sections:
-        header = s.get('Heading', 'Summary')
-        content = s.get('Content', '')
-        if not content: continue
-        
-        # 预估卡片高度
-        sec_lines = get_lines(content, f_body, 1000)
-        card_h = 130 + len(sec_lines) * 44
-        
-        # 绘制阴影效果/背景
-        draw.rectangle([(65, y+5), (1135, y + card_h + 5)], fill=(240, 240, 240)) # 阴影
-        draw.rectangle([(60, y), (1130, y + card_h)], fill=(255, 255, 255), outline=(225, 225, 225))
-        draw.rectangle([(60, y), (75, y + card_h)], fill=(191, 160, 100)) # 左侧品牌色装饰
-        
-        draw.text((100, y + 35), f"▶ {header}", font=f_section, fill=(191, 160, 100))
-        y += 110
-        y = draw_wrapped_text(draw, content, 100, y, f_body, 1000, fill=(60, 60, 60), line_h=1.6)
-        y += 100 # Section spacing
-t.truetype("simhei.ttf", 28)
-        f_footer = ImageFont.truetype("simhei.ttf", 20)
-        f_banner = ImageFont.truetype("simhei.ttf", banner_size)
-        f_wm = ImageFont.truetype("simhei.ttf", 150)
+    # 自适应标题字号
+    title_len = len(L.get("Title", ""))
+    banner_size = 42 if title_len > 30 else 50
+
+    try:
+        f_header  = ImageFont.truetype("simhei.ttf", 36)
+        f_section = ImageFont.truetype("simhei.ttf", 32)
+        f_body    = ImageFont.truetype("simhei.ttf", 28)
+        f_label   = ImageFont.truetype("simhei.ttf", 28)
+        f_footer  = ImageFont.truetype("simhei.ttf", 20)
+        f_banner  = ImageFont.truetype("simhei.ttf", banner_size)
+        f_wm      = ImageFont.truetype("simhei.ttf", 150)
     except:
         f_header = f_section = f_body = f_label = f_footer = f_banner = f_wm = ImageFont.load_default()
+
 
     def sanitize_text(t):
         if not t or not isinstance(t, str): return ""
