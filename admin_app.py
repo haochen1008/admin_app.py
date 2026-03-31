@@ -6,6 +6,9 @@ from PIL import Image, ImageDraw, ImageFont  # type: ignore
 import cloudinary  # type: ignore
 import cloudinary.uploader  # type: ignore
 import requests  # type: ignore
+import re
+from typing import Dict, Any
+from PIL import Image, ImageDraw, ImageFont
 import json
 import re
 from io import BytesIO
@@ -715,206 +718,159 @@ def extract_contract_pro(pdf_file, target_lang="中文") -> Dict[str, Any]:
         return {"error": f"提取失败: {e}"}
 
 
-def create_contract_analysis_pdf(data: Dict, lang: str = "中文") -> Image.Image:
-    """生成合同深度分析 PDF 长图（Deep Dive 3.0 Report）"""
-    # 语言包
-    L = {
-        "中文": {
-            "Title": "合同深度分析报告 | Hao Harbour Intelligence",
-            "MetaTitle": "📌 核心条款",
-            "Landlord": "房东", "Tenant": "租客", "Address": "房屋地址",
-            "Rent": "月租 (PCM)", "Deposit": "押金",
-            "StartDate": "起租日期", "EndDate": "终止日期",
-            "Term": "租期", "Break": "解约条款",
-            "RiskTitle": "⚠️ 潜在风险提示",
-            "RiskDefault": "AI 未识别到明显高风险条款，但建议签约前务必自行核实。",
-            "SummaryTitle": "📝 全篇总结",
-            "Disclaimer": "本报告由 AI 辅助生成，仅供参考，不构成法律建议。请在签约前咨询专业律师。Hao Harbour 对报告内容的准确性不承担法律责任。",
-        },
-        "English": {
-            "Title": "Contract Analysis Report | Hao Harbour Intelligence",
-            "MetaTitle": "📌 Key Terms",
-            "Landlord": "Landlord", "Tenant": "Tenant", "Address": "Property Address",
-            "Rent": "Rent (PCM)", "Deposit": "Deposit",
-            "StartDate": "Start Date", "EndDate": "End Date",
-            "Term": "Term", "Break": "Break Clause",
-            "RiskTitle": "⚠️ Risk Highlights",
-            "RiskDefault": "No major risks flagged by AI. Please verify all terms before signing.",
-            "SummaryTitle": "📝 Summary",
-            "Disclaimer": "This report is AI-assisted and for reference only. It does not constitute legal advice. Please consult a qualified solicitor before signing. Hao Harbour accepts no legal liability for its accuracy.",
-        }
-    }.get(lang, {})
-    if not L:
-        L = {"Title": "Contract Report", "MetaTitle": "Key Terms",
-             "Landlord": "Landlord", "Tenant": "Tenant", "Address": "Address",
-             "Rent": "Rent", "Deposit": "Deposit", "StartDate": "Start",
-             "EndDate": "End", "Term": "Term", "Break": "Break Clause",
-             "RiskTitle": "Risks", "RiskDefault": "None identified.",
-             "SummaryTitle": "Summary", "Disclaimer": "For reference only."}
-
-    # 自适应标题字号
-    title_len = len(L.get("Title", ""))
-    banner_size = 42 if title_len > 30 else 50
-
-    try:
-        f_header  = ImageFont.truetype("simhei.ttf", 36)
-        f_section = ImageFont.truetype("simhei.ttf", 32)
-        f_body    = ImageFont.truetype("simhei.ttf", 28)
-        f_label   = ImageFont.truetype("simhei.ttf", 28)
-        f_footer  = ImageFont.truetype("simhei.ttf", 20)
-        f_banner  = ImageFont.truetype("simhei.ttf", banner_size)
-        f_wm      = ImageFont.truetype("simhei.ttf", 150)
-    except:
-        f_header = f_section = f_body = f_label = f_footer = f_banner = f_wm = ImageFont.load_default()
-
-
+def create_contract_analysis_pdf(data: Dict[str, Any], lang="中文"):
+    """
+    电脑版 PDF 终极版：通过物理安全区缩进和强制字符折行，彻底杜绝右侧内容丢失。
+    """
     def sanitize_text(t):
         if not t or not isinstance(t, str): return ""
-        # 替换常见特殊符号，SimHei 有时无法处理
         t = t.replace("£", "GBP").replace("ø", "o").replace("–", "-").replace("—", "-")
-        # 过滤掉无法渲染的 Emoji 或非 BMP 字符 (包括 0xFFFF 及以上)
-        return "".join(c for c in t if ord(c) < 0xFFFF)
+        return "".join(c for c in t if ord(c) <= 0xFFFF)
 
-    # 创建一个全局用于测量的 dummy image
-    _dummy_img = Image.new('RGB', (1, 1))
-    _dummy_draw = ImageDraw.Draw(_dummy_img)
+    # --- 布局核心控制 (针对 2000px 宽度) ---
+    CANVAS_W = 2000          
+    LEFT_MARGIN = 140        
+    # 将右边界物理限制在 1700，绝对确保右侧 300 像素为空白区，防止任何溢出
+    RIGHT_LIMIT = 1700       
+    MAX_TEXT_W = RIGHT_LIMIT - LEFT_MARGIN 
+    
+    LABEL_COL_W = 400        
+    META_VAL_X = LEFT_MARGIN + LABEL_COL_W 
+    META_VAL_MAX_W = RIGHT_LIMIT - META_VAL_X 
+    
+    LINE_SPACING = 32        
+    BULLET_INDENT = 60       
+    # ---------------------------------------
 
-    def get_lines(text, font, max_width):
+    LABEL_MAP = {
+        "中文": {
+            "Title": "HAO HARBOUR - 合同深度智慧分析报告",
+            "MetaTitle": "【 基本财务 & 关键条文概览 】",
+            "RiskTitle": "【 综合风险观察 】",
+            "RiskDefault": "无显著高危条款",
+            "Disclaimer": "本报告由 Hao Harbour AI 自动生成，旨在协助阅读。不承担法律担保责任，请务必以合同原件为准。"
+        }
+    }
+    L = LABEL_MAP["中文"]
+
+    try:
+        f_banner = ImageFont.truetype("simhei.ttf", 60) 
+        f_section = ImageFont.truetype("simhei.ttf", 46)
+        f_label = ImageFont.truetype("simhei.ttf", 34)
+        f_body = ImageFont.truetype("simhei.ttf", 34)
+        f_footer = ImageFont.truetype("simhei.ttf", 26)
+        f_wm = ImageFont.truetype("simhei.ttf", 160)
+    except:
+        f_banner = f_section = f_label = f_body = f_footer = f_wm = ImageFont.load_default()
+
+    _dummy_draw = ImageDraw.Draw(Image.new('RGB', (1, 1)))
+
+    # --- 增强型换行算法：支持字符级强行折断 ---
+    def get_lines_absolute(text, font, available_width):
         text = sanitize_text(text)
         if not text: return []
-        lines = []
-        current_line = ""
-        for char in str(text):
-            test_line = current_line + char
-            try:
-                # 使用全局测量对象，避免重复创建 Image
-                w = _dummy_draw.textlength(test_line, font=font)
-                if w <= max_width:
+        
+        paragraphs = text.split('\n')
+        all_lines = []
+        
+        for p in paragraphs:
+            current_line = ""
+            for char in p:
+                test_line = current_line + char
+                # 增加 10% 的计算冗余，确保物理安全
+                if _dummy_draw.textlength(test_line, font=font) * 1.05 <= available_width:
                     current_line = test_line
                 else:
-                    lines.append(current_line)
+                    if current_line: all_lines.append(current_line)
                     current_line = char
-            except:
-                lines.append(current_line)
-                current_line = char
-        lines.append(current_line)
-        return lines
+            if current_line: all_lines.append(current_line)
+        return all_lines
 
-    # 第一步：清洗并计算高度
-    meta = {k: sanitize_text(v) for k, v in data.get('Metadata', {}).items()}
-    sections = []
-    for s in data.get('Sections', []):
-        sections.append({
-            "Heading": sanitize_text(s.get('Heading', '')),
-            "Content": sanitize_text(s.get('Content', ''))
-        })
-    
-    risks_txt = sanitize_text(data.get('Risks', ''))
-    summary_txt = sanitize_text(data.get('Summary', ''))
-    
-    y_ptr = 400 
-    y_ptr += 3 * 100 # Metadata Rows
-    y_ptr += 3 * 85  # Metadata Grid
-    
-    for s in sections:
-        y_ptr += 140
-        lines = get_lines(s["Content"], f_body, 1000)
-        y_ptr += len(lines) * 50 + 60
-    
-    y_ptr += 250 + len(get_lines(risks_txt, f_body, 1000)) * 50
-    y_ptr += 150 + len(get_lines(summary_txt, f_body, 1000)) * 50
-    
-    total_est_height = y_ptr + 800
-    
-    canvas = Image.new('RGB', (1200, int(total_est_height)), (255, 255, 255))
-    draw = ImageDraw.Draw(canvas)
-    
-    def draw_wrapped_text(draw, text, x, y, font, max_width, fill=(60, 60, 60), line_h=1.6):
-        lines = get_lines(text, font, max_width)
-        for line in lines:
-            draw.text((x, y), line, font=font, fill=fill)
-            y += int(font.size * line_h)
+    def draw_smart_points(draw, text, x, y, font, max_w, fill=(50, 50, 50)):
+        # 拆分 points (序号/换行)
+        points = re.split(r'\d+[\.\)．]\s*|\n|(?<=[a-z]\.)\s+', text)
+        points = [p.strip() for p in points if len(p.strip()) > 3]
+        
+        for p in points:
+            # 绘制金色列表点
+            draw.text((x, y), "●", font=font, fill=(191, 160, 100))
+            inner_w = max_w - BULLET_INDENT
+            lines = get_lines_absolute(p, font, inner_w)
+            for line in lines:
+                draw.text((x + BULLET_INDENT, y), line, font=font, fill=fill)
+                y += font.size + LINE_SPACING
+            y += 25 
         return y
 
-    def draw_meta_row_full(draw, y, label, val, font_label, font_val):
-        draw.text((80, y), f"{label}:", font=font_label, fill=(100, 100, 100))
-        new_y = draw_wrapped_text(draw, val, 400, y, font_val, 720, fill=(40, 40, 40), line_h=1.4)
-        return max(y + 80, new_y + 20)
+    # --- 渲染流程 ---
+    canvas = Image.new('RGB', (CANVAS_W, 12000), (255, 255, 255))
+    draw = ImageDraw.Draw(canvas)
 
-    def draw_meta_grid(draw, y, l1, v1, l2, v2, font_label, font_val):
-        # 左列
-        draw.text((80, y), f"{l1}:", font=font_label, fill=(100, 100, 100))
-        draw.text((320, y), str(v1), font=font_val, fill=(40, 40, 40))
-        # 右列
-        draw.text((600, y), f"{l2}:", font=font_label, fill=(100, 100, 100))
-        draw.text((840, y), str(v2), font=font_val, fill=(40, 40, 40))
-        return y + 80
-
-    # 1. 页眉 Banner
-    draw.rectangle([(0, 0), (1200, 160)], fill=(26, 26, 26))
-    draw.text((60, 50), L["Title"], font=f_banner, fill=(191, 160, 100))
+    # 1. 页眉
+    draw.rectangle([(0, 0), (CANVAS_W, 220)], fill=(30, 30, 30))
+    draw.text((LEFT_MARGIN, 80), L["Title"], font=f_banner, fill=(210, 180, 120))
     
-    y = 220
-    # 2. 基础财务 & 关键日期 (精品网格布局)
-    draw.text((60, y), L["MetaTitle"], font=f_section, fill=(191, 160, 100))
-    y += 95
-    # 宽项
-    y = draw_meta_row_full(draw, y, L["Landlord"], meta.get('Landlord', ''), f_label, f_body)
-    y = draw_meta_row_full(draw, y, L["Tenant"], meta.get('Tenant', ''), f_label, f_body)
-    y = draw_meta_row_full(draw, y, L["Address"], meta.get('Address', ''), f_label, f_body)
-    # 网格项 (2x2)
-    y = draw_meta_grid(draw, y, L["Rent"], meta.get('RentPCM', ''), L["Deposit"], meta.get('Deposit', ''), f_label, f_body)
-    y = draw_meta_grid(draw, y, L["StartDate"], meta.get('StartDate', ''), L["EndDate"], meta.get('EndDate', ''), f_label, f_body)
-    y = draw_meta_grid(draw, y, L["Term"], meta.get('Term', ''), "Break Clause", meta.get('BreakClause', ''), f_label, f_body)
+    y = 320
+    # 2. Metadata (基本财务)
+    draw.text((LEFT_MARGIN, y), L["MetaTitle"], font=f_section, fill=(210, 180, 120))
+    y += 110
     
-    y += 70
-    # 3. 逐章节核心分析 (Card-based Layout)
-    for s in sections:
-        # 绘制背景卡片 (浅灰色圆角矩形效果)
-        header = s.get('Heading', 'Summary')
-        # 预估高度用于绘制背景
-        sec_lines = get_lines(s["Content"], f_body, 1000)
-        card_h = 110 + len(sec_lines) * 45
-        draw.rectangle([(70, y), (1130, y + card_h)], fill=(250, 250, 250), outline=(230, 230, 230))
-        draw.rectangle([(70, y), (85, y + card_h)], fill=(191, 160, 100)) # 左侧装饰条
+    meta_fields = [
+        ("Landlord", "Landlord"), ("Tenant", "Tenant"), ("Address", "Address"),
+        ("RentPCM", "Rent (PCM)"), ("Deposit", "Deposit"), ("StartDate", "Start Date"),
+        ("EndDate", "End Date"), ("Term", "Term"), ("BreakClause", "Break Clause")
+    ]
+    
+    for key, label in meta_fields:
+        val = str(data.get('Metadata', {}).get(key, 'N/A'))
+        draw.text((LEFT_MARGIN, y), f"{label}:", font=f_label, fill=(130, 130, 130))
         
-        draw.text((110, y + 30), f"📍 {header}", font=f_section, fill=(191, 160, 100))
+        # 使用绝对换行逻辑
+        m_lines = get_lines_absolute(val, f_body, META_VAL_MAX_W)
+        for ml in m_lines:
+            draw.text((META_VAL_X, y), ml, font=f_body, fill=(40, 40, 40))
+            y += f_body.size + 15
+        y += 45
+
+    y += 40
+    # 3. 详细 Sections (核心条款)
+    for s in data.get('Sections', []):
+        heading = sanitize_text(s.get('Heading', 'Summary'))
+        draw.rectangle([(LEFT_MARGIN, y), (LEFT_MARGIN + 15, y + 55)], fill=(191, 160, 100))
+        draw.text((LEFT_MARGIN + 45, y), heading, font=f_section, fill=(50, 50, 50))
         y += 100
-        y = draw_wrapped_text(draw, s.get('Content', ''), 110, y, f_body, 980, line_h=1.6)
-        y += 80 # Section spacing
+        y = draw_smart_points(draw, s.get('Content', ''), LEFT_MARGIN + 45, y, f_body, MAX_TEXT_W - 45)
+        y += 80
 
-    y += 40
-    # 4. 风险建议
-    draw.text((60, y), L["RiskTitle"], font=f_section, fill=(220, 20, 60))
-    y += 85
-    y = draw_wrapped_text(draw, risks_txt if risks_txt else L["RiskDefault"], 110, y, f_body, 980, fill=(200, 20, 20), line_h=1.6)
-    
-    y += 40
-    # 5. 总体结论 (Summary Section)
-    if summary_txt:
-        draw.text((60, y), L["SummaryTitle"], font=f_section, fill=(50, 50, 50))
-        y += 85
-        y = draw_wrapped_text(draw, summary_txt, 110, y, f_body, 980, line_h=1.6)
-        y += 60
+    # 4. 综合风险
+    draw.rectangle([(LEFT_MARGIN, y), (RIGHT_LIMIT, y + 6)], fill=(220, 50, 50))
+    y += 60
+    draw.text((LEFT_MARGIN, y), L["RiskTitle"], font=f_section, fill=(220, 50, 50))
+    y += 110
+    risks = data.get('Risks', L["RiskDefault"])
+    y = draw_smart_points(draw, risks, LEFT_MARGIN + 45, y, f_body, MAX_TEXT_W - 45, fill=(180, 0, 0))
 
-    # 6. 水印
+    # 5. 水印 (铺设范围限制在 RIGHT_LIMIT 以内)
     wm_layer = Image.new('RGBA', canvas.size, (0, 0, 0, 0))
     wm_draw = ImageDraw.Draw(wm_layer)
-    wm_color = (180, 180, 180, 75)
-    wm_txt = "Hao Harbour Intelligence" if lang == "English" else "Hao Harbour 合同深度分析"
-    for i in range(0, canvas.size[1], 1000):
-        wm_draw.text((150, i + 400), wm_txt, font=f_wm, fill=wm_color)
-    rotated_wm = wm_layer.rotate(35, expand=False)
+    for row in range(0, y + 1000, 1200):
+        for col in range(0, RIGHT_LIMIT, 900):
+            wm_draw.text((col, row), "HAO HARBOUR", font=f_wm, fill=(180, 180, 180, 35))
+    rotated_wm = wm_layer.rotate(25, expand=False)
     canvas.paste(rotated_wm, (0, 0), rotated_wm)
 
-    # 7. 页脚
-    footer_height = 320
-    total_y = y + 250 + footer_height
-    final_canvas = canvas.crop((0, 0, 1200, int(total_y)))
+    # 6. 页脚
+    footer_h = 350
+    final_y = y + 150
+    final_canvas = canvas.crop((0, 0, CANVAS_W, int(final_y + footer_h)))
     f_draw = ImageDraw.Draw(final_canvas)
-    f_y = total_y - (footer_height - 30)
-    f_draw.rectangle([(0, f_y), (1200, total_y)], fill=(245, 245, 245))
-    draw_wrapped_text(f_draw, L["Disclaimer"], 60, f_y + 80, f_footer, 1080, fill=(140, 140, 140), line_h=1.5)
+    f_draw.rectangle([(0, final_y), (CANVAS_W, final_y + footer_h)], fill=(245, 245, 245))
+    
+    f_lines = get_lines_absolute(L["Disclaimer"], f_footer, MAX_TEXT_W)
+    fy = final_y + 90
+    for fl in f_lines:
+        f_draw.text((LEFT_MARGIN, fy), fl, font=f_footer, fill=(150, 150, 150))
+        fy += f_footer.size + 15
 
     return final_canvas
 
