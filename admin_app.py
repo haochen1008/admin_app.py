@@ -731,36 +731,60 @@ def create_contract_analysis_pdf(data: Dict[str, Any]):
     except:
         f_header = f_section = f_body = f_label = f_footer = f_banner = f_wm = ImageFont.load_default()
 
+    def sanitize_text(t):
+        if not t or not isinstance(t, str): return ""
+        # 替换英镑符号，SimHei 有时无法处理
+        t = t.replace("£", "GBP").replace("ø", "o").replace("–", "-")
+        # 过滤掉无法渲染的 Emoji 或非 BMP 字符 (防止 textlength 崩溃)
+        return "".join(c for c in t if ord(c) <= 0xFFFF)
+
+    # 创建一个全局用于测量的 dummy image
+    _dummy_img = Image.new('RGB', (1, 1))
+    _dummy_draw = ImageDraw.Draw(_dummy_img)
+
     def get_lines(text, font, max_width):
+        text = sanitize_text(text)
         if not text: return []
         lines = []
         current_line = ""
         for char in str(text):
             test_line = current_line + char
-            temp_img = Image.new('RGB', (1, 1))
-            temp_draw = ImageDraw.Draw(temp_img)
-            if temp_draw.textlength(test_line, font=font) <= max_width:
-                current_line = test_line
-            else:
+            try:
+                # 使用全局测量对象，避免重复创建 Image
+                w = _dummy_draw.textlength(test_line, font=font)
+                if w <= max_width:
+                    current_line = test_line
+                else:
+                    lines.append(current_line)
+                    current_line = char
+            except:
                 lines.append(current_line)
                 current_line = char
         lines.append(current_line)
         return lines
 
-    # 第一步：计算高度
-    meta = data.get('Metadata', {})
-    sections = data.get('Sections', [])
+    # 第一步：清洗并计算高度
+    meta = {k: sanitize_text(v) for k, v in data.get('Metadata', {}).items()}
+    sections = []
+    for s in data.get('Sections', []):
+        sections.append({
+            "Heading": sanitize_text(s.get('Heading', '')),
+            "Content": sanitize_text(s.get('Content', ''))
+        })
+    
+    risks_txt = sanitize_text(data.get('Risks', ''))
+    summary_txt = sanitize_text(data.get('Summary', ''))
     
     y_ptr = 220
     y_ptr += 80 + 9 * 65 # Metadata section
     
     for s in sections:
         y_ptr += 100 # Heading
-        lines = get_lines(s.get('Content', ''), f_body, 1040)
+        lines = get_lines(s["Content"], f_body, 1040)
         y_ptr += len(lines) * 50 + 20
     
-    y_ptr += 120 + len(get_lines(data.get('Risks', ''), f_body, 1040)) * 50
-    y_ptr += 100 + len(get_lines(data.get('Summary', ''), f_body, 1040)) * 50
+    y_ptr += 120 + len(get_lines(risks_txt, f_body, 1040)) * 50
+    y_ptr += 100 + len(get_lines(summary_txt, f_body, 1040)) * 50
     
     total_est_height = y_ptr + 400
     
@@ -768,16 +792,15 @@ def create_contract_analysis_pdf(data: Dict[str, Any]):
     draw = ImageDraw.Draw(canvas)
     
     def draw_wrapped_text(draw, text, x, y, font, max_width, fill=(60, 60, 60)):
-        lines = get_lines(str(text).replace("£", "GBP "), font, max_width)
+        lines = get_lines(text, font, max_width)
         for line in lines:
             draw.text((x, y), line, font=font, fill=fill)
             y += font.size + 15
         return y
 
     def draw_row(draw, y, label, val, font_label, font_val, x_label=80, x_val=400):
-        safe_val = str(val).replace("£", "GBP ")
         draw.text((x_label, y), f"{label}:", font=font_label, fill=(100, 100, 100))
-        draw.text((x_val, y), safe_val, font=font_val, fill=(40, 40, 40))
+        draw.text((x_val, y), str(val), font=font_val, fill=(40, 40, 40))
         return y + 65
 
     # 1. 页眉 Banner
@@ -801,7 +824,8 @@ def create_contract_analysis_pdf(data: Dict[str, Any]):
     y += 50
     # 3. 逐章节核心分析 (Clause-by-Clause Highlights)
     for s in sections:
-        draw.text((60, y), f"• {s.get('Heading', '模块总结')}", font=f_section, fill=(191, 160, 100))
+        header = s.get('Heading', '模块总结')
+        draw.text((60, y), f"• {header}", font=f_section, fill=(191, 160, 100))
         y += 75
         y = draw_wrapped_text(draw, s.get('Content', ''), 85, y, f_body, 1030)
         y += 40
@@ -810,7 +834,7 @@ def create_contract_analysis_pdf(data: Dict[str, Any]):
     # 4. 风险建议
     draw.text((60, y), "【 综合风险观察 】", font=f_section, fill=(220, 20, 60))
     y += 80
-    y = draw_wrapped_text(draw, data.get('Risks', '无显著高危条款'), 85, y, f_body, 1030, fill=(200, 20, 20))
+    y = draw_wrapped_text(draw, risks_txt if risks_txt else '无显著高危条款', 85, y, f_body, 1030, fill=(200, 20, 20))
     
     y += 50
     # 5. 水印
