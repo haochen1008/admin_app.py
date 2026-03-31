@@ -77,6 +77,9 @@ def get_ws():
         return None
 
 
+
+
+
 def get_safe_records(ws):
     """
     Robust version of get_all_records() that avoids GSpreadException
@@ -107,6 +110,7 @@ def get_safe_records(ws):
         import streamlit as st
         st.error(f"⚠️ Read Error: {e}")
         return []
+
 
 
 # --- 3. 智能伦敦分区 ---
@@ -231,7 +235,10 @@ def scrape_rightmove(url):
     }
     try:
         if not url or "rightmove.co.uk" not in url:
-            return None, "无效的 Rightmove 链接"
+            return None
+
+
+, "无效的 Rightmove 链接"
         res = requests.get(url, headers=headers, timeout=15)
         res.raise_for_status()
         html = res.text
@@ -241,7 +248,10 @@ def scrape_rightmove(url):
                 data, _ = json.JSONDecoder().raw_decode(page_model_raw)
                 p_data = data.get('propertyData', {})
             except json.JSONDecodeError as e:
-                return None, f"JSON解析失败: {e}"
+                return None
+
+
+, f"JSON解析失败: {e}"
             
             if p_data:
                 raw_title = p_data.get('text', {}).get('pageTitle', '')
@@ -321,9 +331,15 @@ def scrape_rightmove(url):
                     'lat': lat,
                     'lng': lng
                 }, None
-        return None, "无法解析数据，请检查链接是否为房源页"
+        return None
+
+
+, "无法解析数据，请检查链接是否为房源页"
     except Exception as e:
-        return None, f"抓取失败: {e}"
+        return None
+
+
+, f"抓取失败: {e}"
 
 # --- 4. 核心：海报引擎 (仅修改 display_text 拼接) ---
 def create_poster(files, title, price, rooms, region="伦敦"):
@@ -385,6 +401,9 @@ def create_poster(files, title, price, rooms, region="伦敦"):
     except Exception as e:
         st.error(f"海报生成出错: {e}")
         return None
+
+
+
 # --- 4b. 微信方版海报 1080x1080 ---
 def create_wechat_poster(files, title, price, rooms, region="伦敦"):
     try:
@@ -423,6 +442,9 @@ def create_wechat_poster(files, title, price, rooms, region="伦敦"):
     except Exception as e:
         st.error(f"微信海报生成出错: {e}")
         return None
+
+
+
 
 # --- 4c. 抖音/Story 竖版海报 1080x1920 ---
 def create_story_poster(files, title, price, rooms, region="伦敦"):
@@ -467,6 +489,9 @@ def create_story_poster(files, title, price, rooms, region="伦敦"):
     except Exception as e:
         st.error(f"抖音海报生成出错: {e}")
         return None
+
+
+
 
 # --- 4d. 抖音口播脚本生成 ---
 def gen_douyin_script(title: str, price: int, rooms: str, region: str, desc: str) -> str:
@@ -690,6 +715,9 @@ def gen_comparison_image(selected_props: List[Dict]) -> Image.Image:
 # --- 4g. 市场热度研究 (Trends) ---
 def get_market_trends(keyword: str = "London Rent"):
     if not TrendReq: return None
+
+
+
     try:
         pytrends = TrendReq(hl='en-US', tz=360)
         pytrends.build_payload([keyword], cat=0, timeframe='today 3-m', geo='GB-LND')
@@ -697,6 +725,9 @@ def get_market_trends(keyword: str = "London Rent"):
         return df
     except:
         return None
+
+
+
 
 # --- 4h. 合同提取 (AI) ---
 
@@ -729,11 +760,26 @@ def extract_contract_pro(pdf_file, target_lang="中文") -> Dict[str, Any]:
             f"要求：\n"
             f"1. 务必提取基础元数据：房东、租客、房屋地址、月租(Rent PCM)、押金(Deposit)、起租日期(Starting Date/Commencement Date)、终止日期、租期时长、解约条款(Break Clause)。\n"
             f"2. 除了元数据，请识别合同中的每个大模块（如 Tenant's Obligation, Landlord's Covenants, End of Tenancy, Special Clauses 等）。\n"
-            f"3. 对每个模块进行深度的�    for s in data.get('Sections', []):
-        sections.append({
-            "Heading": sanitize_text(s.get('Heading', '')),
-            "Content": sanitize_text(s.get('Content', ''))
-        })
+            f"3. 对每个模块进行深度的分析，总结核心条款、潜在风险，并高亮对租客不利的内容。\n"
+            f"{lang_instruction}\n"
+            f"必须以 JSON 格式返回，包含: Metadata (Dict), Sections (List of Headings/Content), Risks (String), Summary (String)。"
+        )
+
+        r = requests.post("https://api.deepseek.com/chat/completions",
+            json={
+                "model": "deepseek-chat", 
+                "messages": [{"role": "system", "content": prompt}, {"role": "user", "content": text[:32000]}],
+                "response_format": {"type": "json_object"}
+            },
+            headers={"Authorization": f"Bearer {api_key}"}, timeout=60)
+
+        data = parse_ai_json(r.json()['choices'][0]['message']['content'])
+        sections = []
+        for s in data.get('Sections', []):
+            sections.append({
+                "Heading": sanitize_text(s.get("Heading", "")),
+                "Content": sanitize_text(s.get("Content", "")),
+            })
     
     risks_txt = sanitize_text(data.get('Risks', ''))
     summary_txt = sanitize_text(data.get('Summary', ''))
@@ -873,10 +919,10 @@ t.truetype("simhei.ttf", 28)
     meta = {k: sanitize_text(v) for k, v in data.get('Metadata', {}).items()}
     sections = []
     for s in data.get('Sections', []):
-        sections.append({
-            "Heading": sanitize_text(s.get('Heading', '')),
-            "Content": sanitize_text(s.get('Content', ''))
-        })
+            sections.append({
+                "Heading": sanitize_text(s.get("Heading", "")),
+                "Content": sanitize_text(s.get("Content", "")),
+            })
     
     risks_txt = sanitize_text(data.get('Risks', ''))
     summary_txt = sanitize_text(data.get('Summary', ''))
@@ -1566,11 +1612,11 @@ if ws:
                         if st.button(f"🗑️ 删除此章节", key=f"rem_{i}"):
                             # 标记删除逻辑（通过不加入 new_sections 实现）
                             continue
-                        new_sections.append({"Heading": h_val, "Content": c_val})
+            sections.append({
                 
                 # 添加新章节功能
                 if st.button("➕ 添加一处自定义章节/备注"):
-                    new_sections.append({"Heading": "自定义条款", "Content": ""})
+            sections.append({
                 
                 v3['Sections'] = new_sections
 
