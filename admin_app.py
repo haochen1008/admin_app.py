@@ -46,13 +46,9 @@ VIEWING_DEFAULT_NEIGHBORHOOD = [
 ]
 
 # --- 1. 初始化配置 ---
-cloudinary.config(
-    cloud_name = st.secrets["cloudinary"]["cloud_name"],
-    api_key = st.secrets["cloudinary"]["api_key"],
-    api_secret = st.secrets["cloudinary"]["api_secret"]
-)
-
+# ⚠️ set_page_config 必须是第一个 Streamlit 命令
 st.set_page_config(page_title="Hao Harbour Admin", layout="wide")
+
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;} footer {visibility: hidden;}
@@ -61,6 +57,12 @@ st.markdown("""
     .stButton>button {width: 100%; background-color: #bfa064; color: white; font-weight: bold;}
     </style>
 """, unsafe_allow_html=True)
+
+cloudinary.config(
+    cloud_name = st.secrets["cloudinary"]["cloud_name"],
+    api_key = st.secrets["cloudinary"]["api_key"],
+    api_secret = st.secrets["cloudinary"]["api_secret"]
+)
 
 # --- 2. 数据库连接 ---
 def get_ws():
@@ -696,7 +698,7 @@ def extract_contract_pro(pdf_file, target_lang="中文") -> Dict[str, Any]:
             f"要求：\n"
             f"1. 务必提取基础元数据：房东、租客、房屋地址、月租(Rent PCM)、押金(Deposit)、起租日期(Starting Date/Commencement Date)、终止日期、租期时长、解约条款(Break Clause)。\n"
             f"2. 除了元数据，请识别合同中的每个大模块（如 Tenant's Obligation, Landlord's Covenants, End of Tenancy, Special Clauses 等）。\n"
-            f"3. 对每个模块进行深度的     for s in data.get('Sections', []):
+            f"3. 对每个模块进行深度的�    for s in data.get('Sections', []):
         sections.append({
             "Heading": sanitize_text(s.get('Heading', '')),
             "Content": sanitize_text(s.get('Content', ''))
@@ -1577,5 +1579,3 @@ if ws:
                 st.write("#伦敦租房 #英国留学 #伦敦生活 #伦敦生活方式 #伦敦找房 #HaoHarbour")
 
 # --- End of Admin Tool ---
-
-
