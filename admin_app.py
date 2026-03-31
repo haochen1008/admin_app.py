@@ -735,28 +735,32 @@ import re
 from typing import Dict, Any
 from PIL import Image, ImageDraw, ImageFont
 
+import re
+from typing import Dict, Any
+from PIL import Image, ImageDraw, ImageFont
+
 def create_contract_analysis_pdf(data: Dict[str, Any], lang="中文"):
     """
-    电脑版宽屏 PDF 修复版：强制执行右边界限制，严防内容截断。
+    电脑版 PDF 终极版：通过物理安全区缩进和强制字符折行，彻底杜绝右侧内容丢失。
     """
-    # 1. 基础清洗函数
     def sanitize_text(t):
         if not t or not isinstance(t, str): return ""
         t = t.replace("£", "GBP").replace("ø", "o").replace("–", "-").replace("—", "-")
         return "".join(c for c in t if ord(c) <= 0xFFFF)
 
-    # --- 布局核心控制区 (这是解决截断的关键) ---
-    CANVAS_W = 2000          # 总画布宽
-    LEFT_MARGIN = 120        # 左边距
-    RIGHT_LIMIT = 1800       # 【关键】文字绝对禁止超过此坐标 (留出200px安全区)
-    MAX_TEXT_W = RIGHT_LIMIT - LEFT_MARGIN # 文字实际允许的最大跨度
+    # --- 布局核心控制 (针对 2000px 宽度) ---
+    CANVAS_W = 2000          
+    LEFT_MARGIN = 140        
+    # 将右边界物理限制在 1700，绝对确保右侧 300 像素为空白区，防止任何溢出
+    RIGHT_LIMIT = 1700       
+    MAX_TEXT_W = RIGHT_LIMIT - LEFT_MARGIN 
     
-    LABEL_COL_W = 400        # Metadata左侧标签列宽
-    META_VAL_X = LEFT_MARGIN + LABEL_COL_W # Metadata内容起始坐标
-    META_VAL_MAX_W = RIGHT_LIMIT - META_VAL_X # Metadata内容允许的最大宽度
+    LABEL_COL_W = 400        
+    META_VAL_X = LEFT_MARGIN + LABEL_COL_W 
+    META_VAL_MAX_W = RIGHT_LIMIT - META_VAL_X 
     
-    LINE_SPACING = 32        # 行间距
-    BULLET_INDENT = 60       # 列表点缩进
+    LINE_SPACING = 32        
+    BULLET_INDENT = 60       
     # ---------------------------------------
 
     LABEL_MAP = {
@@ -770,7 +774,6 @@ def create_contract_analysis_pdf(data: Dict[str, Any], lang="中文"):
     }
     L = LABEL_MAP["中文"]
 
-    # 加载字体
     try:
         f_banner = ImageFont.truetype("simhei.ttf", 60) 
         f_section = ImageFont.truetype("simhei.ttf", 46)
@@ -783,56 +786,53 @@ def create_contract_analysis_pdf(data: Dict[str, Any], lang="中文"):
 
     _dummy_draw = ImageDraw.Draw(Image.new('RGB', (1, 1)))
 
-    # --- 核心安全换行逻辑 ---
-    def get_lines_v3(text, font, available_width):
+    # --- 增强型换行算法：支持字符级强行折断 ---
+    def get_lines_absolute(text, font, available_width):
         text = sanitize_text(text)
         if not text: return []
         
         paragraphs = text.split('\n')
         all_lines = []
+        
         for p in paragraphs:
-            # 增加对中英文混合更好的切分处理
-            words = p.split(' ')
             current_line = ""
-            for word in words:
-                # 模拟加入后的长度
-                test_line = (current_line + " " + word).strip()
-                if _dummy_draw.textlength(test_line, font=font) <= available_width:
+            for char in p:
+                test_line = current_line + char
+                # 增加 10% 的计算冗余，确保物理安全
+                if _dummy_draw.textlength(test_line, font=font) * 1.05 <= available_width:
                     current_line = test_line
                 else:
                     if current_line: all_lines.append(current_line)
-                    current_line = word
+                    current_line = char
             if current_line: all_lines.append(current_line)
         return all_lines
 
-    # --- 智能绘制列表 (Bullet Points) ---
     def draw_smart_points(draw, text, x, y, font, max_w, fill=(50, 50, 50)):
-        # 拆分 points
+        # 拆分 points (序号/换行)
         points = re.split(r'\d+[\.\)．]\s*|\n|(?<=[a-z]\.)\s+', text)
         points = [p.strip() for p in points if len(p.strip()) > 3]
         
         for p in points:
-            # 画点
+            # 绘制金色列表点
             draw.text((x, y), "●", font=font, fill=(191, 160, 100))
-            # 内容缩进并换行
             inner_w = max_w - BULLET_INDENT
-            lines = get_lines_v3(p, font, inner_w)
+            lines = get_lines_absolute(p, font, inner_w)
             for line in lines:
                 draw.text((x + BULLET_INDENT, y), line, font=font, fill=fill)
                 y += font.size + LINE_SPACING
-            y += 25 # 点之间的额外留白
+            y += 25 
         return y
 
-    # --- 开始绘图 ---
+    # --- 渲染流程 ---
     canvas = Image.new('RGB', (CANVAS_W, 12000), (255, 255, 255))
     draw = ImageDraw.Draw(canvas)
 
-    # 1. 顶部 Banner
+    # 1. 页眉
     draw.rectangle([(0, 0), (CANVAS_W, 220)], fill=(30, 30, 30))
     draw.text((LEFT_MARGIN, 80), L["Title"], font=f_banner, fill=(210, 180, 120))
     
     y = 320
-    # 2. Metadata 区
+    # 2. Metadata (基本财务)
     draw.text((LEFT_MARGIN, y), L["MetaTitle"], font=f_section, fill=(210, 180, 120))
     y += 110
     
@@ -846,27 +846,24 @@ def create_contract_analysis_pdf(data: Dict[str, Any], lang="中文"):
         val = str(data.get('Metadata', {}).get(key, 'N/A'))
         draw.text((LEFT_MARGIN, y), f"{label}:", font=f_label, fill=(130, 130, 130))
         
-        # 严格按 META_VAL_MAX_W 换行
-        m_lines = get_lines_v3(val, f_body, META_VAL_MAX_W)
+        # 使用绝对换行逻辑
+        m_lines = get_lines_absolute(val, f_body, META_VAL_MAX_W)
         for ml in m_lines:
             draw.text((META_VAL_X, y), ml, font=f_body, fill=(40, 40, 40))
             y += f_body.size + 15
-        y += 40
+        y += 45
 
     y += 40
-    # 3. 详细 Sections (列表化)
+    # 3. 详细 Sections (核心条款)
     for s in data.get('Sections', []):
         heading = sanitize_text(s.get('Heading', 'Summary'))
-        # 装饰金条
         draw.rectangle([(LEFT_MARGIN, y), (LEFT_MARGIN + 15, y + 55)], fill=(191, 160, 100))
         draw.text((LEFT_MARGIN + 45, y), heading, font=f_section, fill=(50, 50, 50))
         y += 100
-        
-        # 严格限制在 MAX_TEXT_W 内
         y = draw_smart_points(draw, s.get('Content', ''), LEFT_MARGIN + 45, y, f_body, MAX_TEXT_W - 45)
         y += 80
 
-    # 4. 风险建议
+    # 4. 综合风险
     draw.rectangle([(LEFT_MARGIN, y), (RIGHT_LIMIT, y + 6)], fill=(220, 50, 50))
     y += 60
     draw.text((LEFT_MARGIN, y), L["RiskTitle"], font=f_section, fill=(220, 50, 50))
@@ -874,23 +871,23 @@ def create_contract_analysis_pdf(data: Dict[str, Any], lang="中文"):
     risks = data.get('Risks', L["RiskDefault"])
     y = draw_smart_points(draw, risks, LEFT_MARGIN + 45, y, f_body, MAX_TEXT_W - 45, fill=(180, 0, 0))
 
-    # 5. 水印
+    # 5. 水印 (铺设范围限制在 RIGHT_LIMIT 以内)
     wm_layer = Image.new('RGBA', canvas.size, (0, 0, 0, 0))
     wm_draw = ImageDraw.Draw(wm_layer)
     for row in range(0, y + 1000, 1200):
-        for col in range(0, CANVAS_W, 900):
-            wm_draw.text((col, row), "HAO HARBOUR", font=f_wm, fill=(180, 180, 180, 40))
+        for col in range(0, RIGHT_LIMIT, 900):
+            wm_draw.text((col, row), "HAO HARBOUR", font=f_wm, fill=(180, 180, 180, 35))
     rotated_wm = wm_layer.rotate(25, expand=False)
     canvas.paste(rotated_wm, (0, 0), rotated_wm)
 
-    # 6. 页脚免责
+    # 6. 页脚
     footer_h = 350
     final_y = y + 150
     final_canvas = canvas.crop((0, 0, CANVAS_W, int(final_y + footer_h)))
     f_draw = ImageDraw.Draw(final_canvas)
     f_draw.rectangle([(0, final_y), (CANVAS_W, final_y + footer_h)], fill=(245, 245, 245))
     
-    f_lines = get_lines_v3(L["Disclaimer"], f_footer, MAX_TEXT_W)
+    f_lines = get_lines_absolute(L["Disclaimer"], f_footer, MAX_TEXT_W)
     fy = final_y + 90
     for fl in f_lines:
         f_draw.text((LEFT_MARGIN, fy), fl, font=f_footer, fill=(150, 150, 150))
