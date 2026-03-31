@@ -6,9 +6,6 @@ from PIL import Image, ImageDraw, ImageFont  # type: ignore
 import cloudinary  # type: ignore
 import cloudinary.uploader  # type: ignore
 import requests  # type: ignore
-import re
-from typing import Dict, Any
-from PIL import Image, ImageDraw, ImageFont
 import json
 import re
 from io import BytesIO
@@ -78,6 +75,45 @@ def get_ws():
     except Exception as e:
         st.error(f"数据库连接失败: {e}")
         return None
+
+def get_all_records_safe(ws) -> list:
+    """
+    安全版 get_all_records：自动处理空列标题导致的 GSpreadException。
+    先尝试标准方式，失败则改用 get_values() 手动解析，彻底跳过空列。
+    """
+    EXPECTED_HEADERS = ["date", "title", "region", "rooms", "price",
+                        "poster-link", "description", "views", "is_featured",
+                        "station", "walkingMinutes", "lat", "lng"]
+    try:
+        # 先尝试带 expected_headers 的方式（跳过不在列表里的空列头）
+        return ws.get_all_records(expected_headers=EXPECTED_HEADERS)
+    except Exception:
+        pass
+    try:
+        # 退路：手动解析 raw values
+        all_values = ws.get_all_values()
+        if not all_values:
+            return []
+        raw_headers = all_values[0]
+        # 只保留非空且在 EXPECTED_HEADERS 里的列
+        col_indices = []
+        seen = set()
+        for idx, h in enumerate(raw_headers):
+            if h and h in EXPECTED_HEADERS and h not in seen:
+                col_indices.append((idx, h))
+                seen.add(h)
+        records = []
+        for row in all_values[1:]:
+            record = {}
+            for idx, h in col_indices:
+                record[h] = row[idx] if idx < len(row) else ""
+            # 跳过完全空白的行
+            if any(v for v in record.values()):
+                records.append(record)
+        return records
+    except Exception as e:
+        st.error(f"⚠️ Google Sheets 读取失败：{e}")
+        return []
 
 # --- 3. 智能伦敦分区 ---
 # 基于英国邮编前缀（outward code）精准定位伦敦五大区
@@ -680,199 +716,553 @@ def parse_ai_json(text: str) -> Dict[str, Any]:
         return {}
 
 def extract_contract_pro(pdf_file, target_lang="中文") -> Dict[str, Any]:
-    """深度提取合同关键信息并返回结构化数据（Deep Dive 3.0）"""
-    if not pdfplumber: return {"error": "⚠️ 未安装 pdfplumber 依赖，无法解析 PDF。"}
+    """
+    深度合同分析 v4.0 — 三段式多轮 AI 分析策略：
+      Pass 1: 提取核心元数据（租金/押金/日期/当事人）
+      Pass 2: 逐章节深度解读（所有条款分组摘要）
+      Pass 3: 综合风险评估 + 租客行动建议
+    """
+    if not pdfplumber:
+        return {"error": "⚠️ 未安装 pdfplumber 依赖，无法解析 PDF。"}
     try:
-        text = ""
+        # ── 读取全部页面 ──
+        pages_text = []
         with pdfplumber.open(pdf_file) as pdf:
-            # 增加扫描深度：读取前 15 页以覆盖大多数 AST 合同的所有关键条款
-            for page in pdf.pages[:15]: 
-                text += page.extract_text() or ""
-        
+            for page in pdf.pages:
+                t = page.extract_text()
+                if t:
+                    pages_text.append(t.strip())
+        full_text = "\n\n".join(pages_text)
+        if not full_text.strip():
+            return {"error": "⚠️ 无法从 PDF 中提取文字，可能是扫描版图片，请上传文字版合同。"}
+
         api_key = st.secrets["OPENAI_API_KEY"]
-        lang_instruction = f"All your summaries and highlights MUST be written in {target_lang}."
-        if target_lang == "中文":
-            lang_instruction += " 内容必须使用中文。"
-        
-        prompt = (
-            f"你是一个专业的英国房屋租赁法务专家。请深度阅读并分析这段 AST 合同文本，并将其分解为多个部分，以 JSON 格式输出。\n"
-            f"要求：\n"
-            f"1. 务必提取基础元数据：房东、租客、房屋地址、月租(Rent PCM)、押金(Deposit)、起租日期(Starting Date/Commencement Date)、终止日期、租期时长、解约条款(Break Clause)。\n"
-            f"2. 除了元数据，请识别合同中的每个大模块（如 Tenant's Obligation, Landlord's Covenants, End of Tenancy, Special Clauses 等）。\n"
-            f"3. 对每个模块进行深度的摘要，提炼出关键义务、权利、费用、日期与风险点。\n"
-            f"4. 请特别关注对租客不利的条款或风险（如 unusual break clause terms, high deposit, tenant liability for repairs 等）。\n"
-            f"5. 最终输出格式为 JSON，包含以下字段： Metadata (dict), Sections (list of {{Heading, Content}}), Risks (str), Summary (str)。\n"
-            f"{lang_instruction}"
-        )
-        r = requests.post("https://api.deepseek.com/chat/completions",
-            json={"model": "deepseek-chat", "messages": [
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": text[:12000]}
-            ]},
-            headers={"Authorization": f"Bearer {api_key}"}, timeout=90)
-        raw_json = r.json()['choices'][0]['message']['content']
-        data = parse_ai_json(raw_json)
-        if not data: return {"error": "⚠️ AI 返回的数据无法解析，请重试。"}
-        return data
+        lang_note = "请用中文回答所有内容。" if target_lang == "中文" else "Please respond entirely in English."
+
+        def call_ai(system_prompt: str, user_content: str, timeout: int = 120) -> str:
+            r = requests.post(
+                "https://api.deepseek.com/chat/completions",
+                json={"model": "deepseek-chat", "max_tokens": 4096, "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user",   "content": user_content}
+                ]},
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=timeout
+            )
+            return r.json()["choices"][0]["message"]["content"]
+
+        # ── 截取前 8000 字符 + 后 4000 字符覆盖合同首尾（元数据/特殊条款通常在头尾）──
+        text_head = full_text[:8000]
+        text_tail = full_text[-4000:] if len(full_text) > 10000 else ""
+        text_middle_chunks = []
+        chunk_size = 6000
+        middle = full_text[8000:len(full_text)-4000] if len(full_text) > 12000 else ""
+        for i in range(0, len(middle), chunk_size):
+            text_middle_chunks.append(middle[i:i+chunk_size])
+
+        # ════════════════════════════════════════
+        # PASS 1 — 核心元数据精准提取
+        # ════════════════════════════════════════
+        pass1_system = f"""你是英国顶级租赁法律专家，专注提取 AST（Assured Shorthold Tenancy）合同中的核心元数据。
+{lang_note}
+请从合同文本中精准提取以下字段，输出严格的 JSON 格式（不要有任何 markdown 包裹）：
+{{
+  "Landlord": "房东全名",
+  "LandlordAddress": "房东联系地址",
+  "LandlordAgent": "房东代理/中介公司（若有）",
+  "Tenant": "所有租客全名（多人用逗号分隔）",
+  "TenantID": "租客身份证明/Passport 要求（若提及）",
+  "Address": "出租房屋完整地址（含邮编）",
+  "StartDate": "起租日期",
+  "EndDate": "合同终止日期",
+  "Term": "租期时长（如 12 months, 6 months）",
+  "RentPCM": "月租金额（如 £2,500 per calendar month）",
+  "RentPayDay": "租金支付日（每月几号）",
+  "RentPayMethod": "支付方式（如 standing order/bank transfer）",
+  "Deposit": "押金金额",
+  "DepositScheme": "押金保护计划（如 DPS/TDS/mydeposits）",
+  "BreakClause": "解约条款详情（起效时间、提前通知期、双方是否均可行使）",
+  "NoticePeriod": "到期不续约的提前通知要求",
+  "HoldingDeposit": "预订押金（若有）",
+  "RentReview": "租金审查条款（若有）",
+  "PermittedOccupants": "允许同住人员限制（若有）",
+  "PetsAllowed": "是否允许养宠物",
+  "SmokingAllowed": "是否允许吸烟",
+  "Guarantor": "是否需要担保人（Guarantor）"
+}}
+如某字段合同中未提及，填写 "未提及"。务必不要猜测，只提取合同中明确出现的信息。"""
+
+        pass1_raw = call_ai(pass1_system, text_head + ("\n\n[合同尾部补充]\n" + text_tail if text_tail else ""))
+        metadata = parse_ai_json(pass1_raw)
+        if not metadata:
+            metadata = {"RentPCM": "解析失败，请手动填写", "Address": "解析失败，请手动填写"}
+
+        # ════════════════════════════════════════
+        # PASS 2 — 逐章节深度解读
+        # ════════════════════════════════════════
+        clause_groups = {
+            "租客义务 (Tenant Obligations)": [
+                "rent payment", "utility bills", "council tax", "insurance", "repairs", "maintenance",
+                "cleaning", "gardening", "alterations", "subletting", "nuisance", "decoration",
+                "tenant shall", "tenant must", "tenant's obligation", "tenant agrees"
+            ],
+            "房东义务 (Landlord Covenants)": [
+                "landlord shall", "landlord must", "landlord's obligation", "quiet enjoyment",
+                "gas safety", "electrical safety", "EPC", "HMO", "landlord covenants",
+                "landlord agrees", "right to enter", "notice of entry"
+            ],
+            "维修与保养 (Repairs & Maintenance)": [
+                "repair", "maintenance", "damage", "fair wear and tear", "fixtures", "fittings",
+                "appliances", "boiler", "structure", "damp", "mould", "emergency repair"
+            ],
+            "押金与费用 (Deposit & Fees)": [
+                "deposit", "holding deposit", "dilapidation", "cleaning fee", "check-out",
+                "inventory", "deduction", "deposit scheme", "protected", "adjudication",
+                "administration fee", "renewal fee"
+            ],
+            "合同终止与续签 (Termination & Renewal)": [
+                "break clause", "notice", "vacate", "surrender", "periodic tenancy",
+                "rolling contract", "renewal", "end of tenancy", "holdover", "section 21",
+                "section 8", "possession", "eviction"
+            ],
+            "入住与离开 (Check-in & Check-out)": [
+                "inventory", "check-in", "check-out", "condition report", "professional clean",
+                "carpet clean", "key", "meter reading", "forwarding address"
+            ],
+            "特殊条款与附加条件 (Special Clauses)": [
+                "special condition", "additional clause", "addendum", "schedule", "rider",
+                "pet clause", "smoking", "guarantor", "parental guarantee", "diplomatic clause",
+                "redecoration", "garden maintenance"
+            ]
+        }
+
+        all_sections = []
+        # 处理头部文本
+        texts_to_analyze = [("合同主体", text_head)]
+        for idx, chunk in enumerate(text_middle_chunks):
+            texts_to_analyze.append((f"合同中段 Part {idx+2}", chunk))
+        if text_tail:
+            texts_to_analyze.append(("合同尾部/特殊条款", text_tail))
+
+        pass2_system = f"""你是英国顶级 AST 租赁合同法律分析师。
+{lang_note}
+请对以下合同文本片段进行深度逐条解读，识别并总结以下类别的条款。
+对每个类别，请详细说明：具体要求、金额/时间节点、双方权利义务、潜在风险点。
+如该片段中没有某类别的内容，请跳过该类别（不要输出空内容）。
+输出严格 JSON 数组格式（不要有任何 markdown 包裹）：
+[
+  {{
+    "Heading": "类别名称",
+    "Content": "详细分析内容（300-600字，要有实质内容，不要笼统概括）",
+    "RiskLevel": "HIGH/MEDIUM/LOW",
+    "KeyPoints": ["要点1", "要点2", "要点3"]
+  }}
+]
+重要：
+- 提及具体金额、日期、天数时必须直接引用合同原文数字
+- 识别任何对租客不利、不寻常或高风险的条款
+- 区分"合同标准条款"和"非标准/特殊条款"
+- 类别名称使用：{', '.join(clause_groups.keys())}"""
+
+        for chunk_name, chunk_text in texts_to_analyze:
+            chunk_raw = call_ai(pass2_system, f"[{chunk_name}]\n\n{chunk_text}")
+            chunk_sections = parse_ai_json(chunk_raw)
+            if isinstance(chunk_sections, list):
+                all_sections.extend(chunk_sections)
+
+        # 合并相同 Heading 的 sections
+        merged: Dict[str, Dict] = {}
+        for sec in all_sections:
+            h = sec.get("Heading", "其他")
+            if h not in merged:
+                merged[h] = {"Heading": h, "Content": sec.get("Content", ""),
+                             "RiskLevel": sec.get("RiskLevel", "LOW"),
+                             "KeyPoints": sec.get("KeyPoints", [])}
+            else:
+                existing = merged[h]["Content"]
+                new_content = sec.get("Content", "")
+                if new_content and new_content not in existing:
+                    merged[h]["Content"] = existing + "\n\n" + new_content
+                merged[h]["KeyPoints"] = list(dict.fromkeys(
+                    merged[h].get("KeyPoints", []) + sec.get("KeyPoints", [])
+                ))[:8]
+                # Escalate risk level
+                rl_order = {"HIGH": 2, "MEDIUM": 1, "LOW": 0}
+                if rl_order.get(sec.get("RiskLevel","LOW"),0) > rl_order.get(merged[h]["RiskLevel"],0):
+                    merged[h]["RiskLevel"] = sec.get("RiskLevel","LOW")
+
+        final_sections = list(merged.values())
+
+        # ════════════════════════════════════════
+        # PASS 3 — 综合风险评估 + 租客行动建议
+        # ════════════════════════════════════════
+        pass3_system = f"""你是英国 AST 租赁合同专家和租客权益顾问。
+{lang_note}
+根据以下合同摘要，请生成：
+1. 综合风险评估（HIGH/MEDIUM/LOW 总体评级，并给出理由）
+2. 前5大风险条款（每条注明风险类型、具体条款内容、对租客的影响）
+3. 租客在签约前应重点核查/谈判的条款（至少5点具体建议）
+4. 入住前必做事项清单（如拍照留证、检查inventory等，至少6点）
+5. 离租前必做事项清单（至少5点）
+6. 一句话总结（用于快速告知客户该合同的整体情况）
+
+输出严格 JSON 格式（不要有任何 markdown 包裹）：
+{{
+  "OverallRisk": "HIGH/MEDIUM/LOW",
+  "OverallRiskReason": "总体评级理由（2-3句话）",
+  "TopRisks": [
+    {{"Title": "风险名称", "Detail": "具体风险内容", "Impact": "对租客的影响"}}
+  ],
+  "NegotiationPoints": ["谈判建议1", "谈判建议2", ...],
+  "CheckinChecklist": ["入住前行动1", "入住前行动2", ...],
+  "CheckoutChecklist": ["离租前行动1", "离租前行动2", ...],
+  "OneLiner": "一句话总结"
+}}"""
+
+        meta_summary = json.dumps(metadata, ensure_ascii=False)
+        sections_summary = json.dumps([{"Heading": s["Heading"], "Content": s["Content"][:300]} for s in final_sections[:8]], ensure_ascii=False)
+        pass3_input = f"元数据摘要：\n{meta_summary}\n\n章节摘要：\n{sections_summary}"
+        pass3_raw = call_ai(pass3_system, pass3_input)
+        risk_data = parse_ai_json(pass3_raw)
+        if not risk_data:
+            risk_data = {"OverallRisk": "MEDIUM", "OverallRiskReason": "解析失败，请手动评估",
+                         "TopRisks": [], "NegotiationPoints": [], "CheckinChecklist": [],
+                         "CheckoutChecklist": [], "OneLiner": "合同已解析，请查看各章节详情"}
+
+        return {
+            "Metadata": metadata,
+            "Sections": final_sections,
+            "RiskData": risk_data,
+            "Risks": risk_data.get("OverallRiskReason", ""),
+            "Summary": risk_data.get("OneLiner", ""),
+            "lang": target_lang
+        }
+
     except Exception as e:
         return {"error": f"提取失败: {e}"}
 
 
-def create_contract_analysis_pdf(data: Dict[str, Any], lang="中文"):
-    """
-    电脑版 PDF 终极版：通过物理安全区缩进和强制字符折行，彻底杜绝右侧内容丢失。
-    """
-    def sanitize_text(t):
-        if not t or not isinstance(t, str): return ""
-        t = t.replace("£", "GBP").replace("ø", "o").replace("–", "-").replace("—", "-")
-        return "".join(c for c in t if ord(c) <= 0xFFFF)
+def create_contract_analysis_pdf(data: Dict, lang: str = "中文") -> Image.Image:
+    """生成合同深度分析 PDF 长图 v4.0 — 带风险评级、要点列表、行动清单"""
 
-    # --- 布局核心控制 (针对 2000px 宽度) ---
-    CANVAS_W = 2000          
-    LEFT_MARGIN = 140        
-    # 将右边界物理限制在 1700，绝对确保右侧 300 像素为空白区，防止任何溢出
-    RIGHT_LIMIT = 1700       
-    MAX_TEXT_W = RIGHT_LIMIT - LEFT_MARGIN 
-    
-    LABEL_COL_W = 400        
-    META_VAL_X = LEFT_MARGIN + LABEL_COL_W 
-    META_VAL_MAX_W = RIGHT_LIMIT - META_VAL_X 
-    
-    LINE_SPACING = 32        
-    BULLET_INDENT = 60       
-    # ---------------------------------------
+    is_cn = (lang == "中文")
 
-    LABEL_MAP = {
-        "中文": {
-            "Title": "HAO HARBOUR - 合同深度智慧分析报告",
-            "MetaTitle": "【 基本财务 & 关键条文概览 】",
-            "RiskTitle": "【 综合风险观察 】",
-            "RiskDefault": "无显著高危条款",
-            "Disclaimer": "本报告由 Hao Harbour AI 自动生成，旨在协助阅读。不承担法律担保责任，请务必以合同原件为准。"
-        }
-    }
-    L = LABEL_MAP["中文"]
+    # ── 颜色系统 ──
+    C_BG       = (255, 255, 255)
+    C_DARK     = (28,  28,  36)
+    C_GOLD     = (191, 160, 100)
+    C_GOLD_LT  = (245, 235, 210)
+    C_GRAY_LT  = (248, 248, 250)
+    C_GRAY_MID = (220, 220, 225)
+    C_TEXT     = (45,  45,  55)
+    C_SUB      = (110, 110, 120)
+    C_HIGH     = (220, 38,  38)    # HIGH risk — red
+    C_MED      = (217, 119, 6)     # MEDIUM risk — amber
+    C_LOW      = (22,  163, 74)    # LOW risk — green
+    C_SECTION  = (30,  64,  175)   # section heading — blue
 
+    RISK_COLOR = {"HIGH": C_HIGH, "MEDIUM": C_MED, "LOW": C_LOW}
+    RISK_LABEL_CN  = {"HIGH": "高风险", "MEDIUM": "中等风险", "LOW": "低风险"}
+    RISK_LABEL_EN  = {"HIGH": "HIGH RISK", "MEDIUM": "MEDIUM RISK", "LOW": "LOW RISK"}
+
+    # ── 字体 ──
     try:
-        f_banner = ImageFont.truetype("simhei.ttf", 60) 
-        f_section = ImageFont.truetype("simhei.ttf", 46)
-        f_label = ImageFont.truetype("simhei.ttf", 34)
-        f_body = ImageFont.truetype("simhei.ttf", 34)
-        f_footer = ImageFont.truetype("simhei.ttf", 26)
-        f_wm = ImageFont.truetype("simhei.ttf", 160)
+        f_title   = ImageFont.truetype("simhei.ttf", 46)
+        f_h1      = ImageFont.truetype("simhei.ttf", 36)
+        f_h2      = ImageFont.truetype("simhei.ttf", 30)
+        f_body    = ImageFont.truetype("simhei.ttf", 26)
+        f_small   = ImageFont.truetype("simhei.ttf", 22)
+        f_tag     = ImageFont.truetype("simhei.ttf", 20)
+        f_wm      = ImageFont.truetype("simhei.ttf", 130)
     except:
-        f_banner = f_section = f_label = f_body = f_footer = f_wm = ImageFont.load_default()
+        f_title = f_h1 = f_h2 = f_body = f_small = f_tag = f_wm = ImageFont.load_default()
 
-    _dummy_draw = ImageDraw.Draw(Image.new('RGB', (1, 1)))
+    # ── 辅助函数 ──
+    _dummy_img  = Image.new("RGB", (1, 1))
+    _dummy_draw = ImageDraw.Draw(_dummy_img)
 
-    # --- 增强型换行算法：支持字符级强行折断 ---
-    def get_lines_absolute(text, font, available_width):
-        text = sanitize_text(text)
-        if not text: return []
-        
-        paragraphs = text.split('\n')
-        all_lines = []
-        
-        for p in paragraphs:
-            current_line = ""
-            for char in p:
-                test_line = current_line + char
-                # 增加 10% 的计算冗余，确保物理安全
-                if _dummy_draw.textlength(test_line, font=font) * 1.05 <= available_width:
-                    current_line = test_line
-                else:
-                    if current_line: all_lines.append(current_line)
-                    current_line = char
-            if current_line: all_lines.append(current_line)
-        return all_lines
+    def sanitize(t):
+        if not t or not isinstance(t, str): return ""
+        t = t.replace("£", "GBP").replace("–", "-").replace("—", "-").replace("’", "'").replace("“", '"').replace("”", '"')
+        return "".join(c for c in t if ord(c) < 0xFFFF)
 
-    def draw_smart_points(draw, text, x, y, font, max_w, fill=(50, 50, 50)):
-        # 拆分 points (序号/换行)
-        points = re.split(r'\d+[\.\)．]\s*|\n|(?<=[a-z]\.)\s+', text)
-        points = [p.strip() for p in points if len(p.strip()) > 3]
-        
-        for p in points:
-            # 绘制金色列表点
-            draw.text((x, y), "●", font=font, fill=(191, 160, 100))
-            inner_w = max_w - BULLET_INDENT
-            lines = get_lines_absolute(p, font, inner_w)
-            for line in lines:
-                draw.text((x + BULLET_INDENT, y), line, font=font, fill=fill)
-                y += font.size + LINE_SPACING
-            y += 25 
+    def wrap_text(draw_obj, text, x, y, font, max_w, fill=None, line_gap=8):
+        if fill is None: fill = C_TEXT
+        text = sanitize(text)
+        if not text: return y
+        lines_out = []
+        cur = ""
+        for ch in text:
+            test = cur + ch
+            try:
+                w = _dummy_draw.textlength(test, font=font)
+            except:
+                w = len(test) * (font.size if hasattr(font, "size") else 12)
+            if w <= max_w:
+                cur = test
+            else:
+                if cur: lines_out.append(cur)
+                cur = ch
+        if cur: lines_out.append(cur)
+        for ln in lines_out:
+            draw_obj.text((x, y), ln, font=font, fill=fill)
+            y += (font.size if hasattr(font, "size") else 14) + line_gap
         return y
 
-    # --- 渲染流程 ---
-    canvas = Image.new('RGB', (CANVAS_W, 12000), (255, 255, 255))
-    draw = ImageDraw.Draw(canvas)
+    def draw_pill(draw_obj, x, y, label, color, font):
+        """小圆角标签"""
+        try:
+            tw = _dummy_draw.textlength(label, font=font)
+        except:
+            tw = len(label) * 10
+        pad_x, pad_y = 14, 6
+        w, h = int(tw) + pad_x * 2, (font.size if hasattr(font, "size") else 14) + pad_y * 2
+        r8 = 10
+        draw_obj.rounded_rectangle([x, y, x + w, y + h], radius=r8, fill=color)
+        draw_obj.text((x + pad_x, y + pad_y), label, font=font, fill=(255, 255, 255))
+        return w + 12
 
-    # 1. 页眉
-    draw.rectangle([(0, 0), (CANVAS_W, 220)], fill=(30, 30, 30))
-    draw.text((LEFT_MARGIN, 80), L["Title"], font=f_banner, fill=(210, 180, 120))
-    
-    y = 320
-    # 2. Metadata (基本财务)
-    draw.text((LEFT_MARGIN, y), L["MetaTitle"], font=f_section, fill=(210, 180, 120))
-    y += 110
-    
-    meta_fields = [
-        ("Landlord", "Landlord"), ("Tenant", "Tenant"), ("Address", "Address"),
-        ("RentPCM", "Rent (PCM)"), ("Deposit", "Deposit"), ("StartDate", "Start Date"),
-        ("EndDate", "End Date"), ("Term", "Term"), ("BreakClause", "Break Clause")
-    ]
-    
-    for key, label in meta_fields:
-        val = str(data.get('Metadata', {}).get(key, 'N/A'))
-        draw.text((LEFT_MARGIN, y), f"{label}:", font=f_label, fill=(130, 130, 130))
-        
-        # 使用绝对换行逻辑
-        m_lines = get_lines_absolute(val, f_body, META_VAL_MAX_W)
-        for ml in m_lines:
-            draw.text((META_VAL_X, y), ml, font=f_body, fill=(40, 40, 40))
-            y += f_body.size + 15
-        y += 45
+    def draw_section_header(draw_obj, y, title, accent_color=None, canvas_w=1200):
+        if accent_color is None: accent_color = C_GOLD
+        # 左侧竖条 + 文字
+        draw_obj.rectangle([(60, y), (70, y + 44)], fill=accent_color)
+        draw_obj.text((86, y + 4), sanitize(title), font=f_h1, fill=C_DARK)
+        y += 60
+        draw_obj.line([(60, y - 6), (canvas_w - 60, y - 6)], fill=C_GRAY_MID, width=1)
+        return y
 
-    y += 40
-    # 3. 详细 Sections (核心条款)
-    for s in data.get('Sections', []):
-        heading = sanitize_text(s.get('Heading', 'Summary'))
-        draw.rectangle([(LEFT_MARGIN, y), (LEFT_MARGIN + 15, y + 55)], fill=(191, 160, 100))
-        draw.text((LEFT_MARGIN + 45, y), heading, font=f_section, fill=(50, 50, 50))
-        y += 100
-        y = draw_smart_points(draw, s.get('Content', ''), LEFT_MARGIN + 45, y, f_body, MAX_TEXT_W - 45)
-        y += 80
+    def estimate_height(text, font, max_w, line_gap=8):
+        """估算文字块高度"""
+        dummy = Image.new("RGB", (1, 1))
+        dd = ImageDraw.Draw(dummy)
+        text = sanitize(text)
+        if not text: return 0
+        cur, h = "", 0
+        lh = (font.size if hasattr(font, "size") else 14) + line_gap
+        for ch in text:
+            test = cur + ch
+            try: w = _dummy_draw.textlength(test, font=font)
+            except: w = len(test) * 10
+            if w <= max_w: cur = test
+            else: h += lh; cur = ch
+        return h + lh
 
-    # 4. 综合风险
-    draw.rectangle([(LEFT_MARGIN, y), (RIGHT_LIMIT, y + 6)], fill=(220, 50, 50))
+    # ── 从 data 解包 ──
+    meta      = data.get("Metadata", {})
+    sections  = data.get("Sections", [])
+    risk_data = data.get("RiskData", {})
+    overall_risk = risk_data.get("OverallRisk", "MEDIUM")
+    top_risks    = risk_data.get("TopRisks", [])
+    neg_points   = risk_data.get("NegotiationPoints", [])
+    checkin_list = risk_data.get("CheckinChecklist", [])
+    checkout_list= risk_data.get("CheckoutChecklist", [])
+    one_liner    = risk_data.get("OneLiner", data.get("Summary", ""))
+
+    # ── 预估总高度 ──
+    est_h = 600   # header + meta
+    est_h += 300  # overall risk block
+    for s in sections:
+        est_h += 80 + estimate_height(s.get("Content", ""), f_body, 960) + len(s.get("KeyPoints", [])) * 34 + 60
+    est_h += 100 + len(top_risks) * 160
+    est_h += 100 + len(neg_points) * 36
+    est_h += 100 + len(checkin_list) * 34
+    est_h += 100 + len(checkout_list) * 34
+    est_h += 300  # footer
+
+    W = 1200
+    canvas = Image.new("RGB", (W, int(est_h) + 400), C_BG)
+    draw   = ImageDraw.Draw(canvas)
+    y = 0
+
+    # ══════════════════════════════════
+    # 1. 顶部 Banner
+    # ══════════════════════════════════
+    draw.rectangle([(0, 0), (W, 180)], fill=C_DARK)
+    title_txt = "合同深度分析报告" if is_cn else "Contract Deep-Dive Report"
+    draw.text((60, 30), sanitize(title_txt), font=f_title, fill=C_GOLD)
+    subtitle = "Hao Harbour Intelligence · AI-Powered AST Analysis"
+    draw.text((60, 95), subtitle, font=f_small, fill=(180, 180, 190))
+    # 右侧整体风险评级 badge
+    risk_col = RISK_COLOR.get(overall_risk, C_MED)
+    risk_lbl = (RISK_LABEL_CN if is_cn else RISK_LABEL_EN).get(overall_risk, overall_risk)
+    draw.rounded_rectangle([(W - 230, 40), (W - 60, 130)], radius=14, fill=risk_col)
+    draw.text((W - 220, 50), "整体风险" if is_cn else "Overall Risk", font=f_small, fill=(255, 255, 255))
+    draw.text((W - 210, 78), risk_lbl, font=f_h2, fill=(255, 255, 255))
+    y = 200
+
+    # ══════════════════════════════════
+    # 2. 核心元数据卡片（3列网格）
+    # ══════════════════════════════════
+    draw.rectangle([(40, y), (W - 40, y + 48)], fill=C_GOLD)
+    section_title = "📌 核心条款速览" if is_cn else "📌 Key Contract Terms"
+    draw.text((60, y + 8), sanitize(section_title), font=f_h2, fill=(255, 255, 255))
     y += 60
-    draw.text((LEFT_MARGIN, y), L["RiskTitle"], font=f_section, fill=(220, 50, 50))
-    y += 110
-    risks = data.get('Risks', L["RiskDefault"])
-    y = draw_smart_points(draw, risks, LEFT_MARGIN + 45, y, f_body, MAX_TEXT_W - 45, fill=(180, 0, 0))
 
-    # 5. 水印 (铺设范围限制在 RIGHT_LIMIT 以内)
-    wm_layer = Image.new('RGBA', canvas.size, (0, 0, 0, 0))
-    wm_draw = ImageDraw.Draw(wm_layer)
-    for row in range(0, y + 1000, 1200):
-        for col in range(0, RIGHT_LIMIT, 900):
-            wm_draw.text((col, row), "HAO HARBOUR", font=f_wm, fill=(180, 180, 180, 35))
-    rotated_wm = wm_layer.rotate(25, expand=False)
-    canvas.paste(rotated_wm, (0, 0), rotated_wm)
+    META_FIELDS = [
+        ("房东" if is_cn else "Landlord",          meta.get("Landlord", "—")),
+        ("租客" if is_cn else "Tenant",             meta.get("Tenant", "—")),
+        ("房屋地址" if is_cn else "Property",       meta.get("Address", "—")),
+        ("月租" if is_cn else "Rent PCM",           meta.get("RentPCM", "—")),
+        ("押金" if is_cn else "Deposit",            meta.get("Deposit", "—")),
+        ("起租日期" if is_cn else "Start Date",     meta.get("StartDate", "—")),
+        ("终止日期" if is_cn else "End Date",       meta.get("EndDate", "—")),
+        ("租期" if is_cn else "Term",               meta.get("Term", "—")),
+        ("租金支付日" if is_cn else "Pay Day",      meta.get("RentPayDay", "—")),
+        ("支付方式" if is_cn else "Pay Method",     meta.get("RentPayMethod", "—")),
+        ("押金保护" if is_cn else "Deposit Scheme", meta.get("DepositScheme", "—")),
+        ("解约条款" if is_cn else "Break Clause",   meta.get("BreakClause", "—")),
+        ("提前通知" if is_cn else "Notice Period",  meta.get("NoticePeriod", "—")),
+        ("是否需担保人" if is_cn else "Guarantor",  meta.get("Guarantor", "—")),
+        ("养宠物" if is_cn else "Pets",             meta.get("PetsAllowed", "—")),
+    ]
 
-    # 6. 页脚
-    footer_h = 350
-    final_y = y + 150
-    final_canvas = canvas.crop((0, 0, CANVAS_W, int(final_y + footer_h)))
-    f_draw = ImageDraw.Draw(final_canvas)
-    f_draw.rectangle([(0, final_y), (CANVAS_W, final_y + footer_h)], fill=(245, 245, 245))
-    
-    f_lines = get_lines_absolute(L["Disclaimer"], f_footer, MAX_TEXT_W)
-    fy = final_y + 90
-    for fl in f_lines:
-        f_draw.text((LEFT_MARGIN, fy), fl, font=f_footer, fill=(150, 150, 150))
-        fy += f_footer.size + 15
+    col_w = (W - 80) // 3
+    col_x = [60, 60 + col_w + 10, 60 + (col_w + 10) * 2]
+    row_h = 80
+    for idx, (label, value) in enumerate(META_FIELDS):
+        cx = col_x[idx % 3]
+        cy = y + (idx // 3) * row_h
+        draw.rounded_rectangle([(cx, cy), (cx + col_w - 10, cy + 70)], radius=8, fill=C_GRAY_LT, outline=C_GRAY_MID)
+        draw.text((cx + 12, cy + 8),  sanitize(label), font=f_small, fill=C_SUB)
+        wrap_text(draw, sanitize(str(value))[:80], cx + 12, cy + 30, f_body, col_w - 30, fill=C_TEXT)
 
-    return final_canvas
+    y += ((len(META_FIELDS) + 2) // 3) * row_h + 40
+
+    # ══════════════════════════════════
+    # 3. 总体风险说明
+    # ══════════════════════════════════
+    risk_bg = {k: (v[0], v[1], v[2], 25) for k, v in RISK_COLOR.items()}
+    draw.rounded_rectangle([(40, y), (W - 40, y + 100)], radius=12, fill=C_GRAY_LT, outline=RISK_COLOR.get(overall_risk, C_MED))
+    risk_reason = risk_data.get("OverallRiskReason", "")
+    lbl = "整体风险评估：" if is_cn else "Overall Risk Assessment: "
+    draw.text((60, y + 10), lbl + risk_lbl, font=f_h2, fill=RISK_COLOR.get(overall_risk, C_MED))
+    wrap_text(draw, sanitize(risk_reason), 60, y + 48, f_body, W - 120, fill=C_TEXT)
+    y += 120
+
+    # ══════════════════════════════════
+    # 4. 章节深度解读
+    # ══════════════════════════════════
+    y = draw_section_header(draw, y + 20, "📖 逐章节深度解读" if is_cn else "📖 Clause-by-Clause Analysis")
+
+    for sec in sections:
+        heading  = sanitize(sec.get("Heading", ""))
+        content  = sanitize(sec.get("Content", ""))
+        kps      = sec.get("KeyPoints", [])
+        sec_risk = sec.get("RiskLevel", "LOW")
+        if not content: continue
+
+        # 章节标题行 + 风险标签
+        draw.text((60, y), f"▶  {heading}", font=f_h2, fill=C_SECTION)
+        rl_lbl = (RISK_LABEL_CN if is_cn else RISK_LABEL_EN).get(sec_risk, sec_risk)
+        draw_pill(draw, 80 + min(int(_dummy_draw.textlength(f"▶  {heading}", font=f_h2)), 700) + 20,
+                  y + 4, rl_lbl, RISK_COLOR.get(sec_risk, C_LOW), f_tag)
+        y += 44
+
+        # 正文
+        y = wrap_text(draw, content, 80, y, f_body, W - 160, fill=C_TEXT)
+        y += 10
+
+        # 要点列表
+        if kps:
+            kp_title = "关键要点：" if is_cn else "Key Points:"
+            draw.text((80, y), kp_title, font=f_small, fill=C_SUB)
+            y += 28
+            for kp in kps[:6]:
+                draw.text((100, y), "•", font=f_body, fill=C_GOLD)
+                y = wrap_text(draw, sanitize(str(kp)), 120, y, f_small, W - 180, fill=C_SUB)
+            y += 8
+
+        # 分隔线
+        draw.line([(80, y + 10), (W - 80, y + 10)], fill=C_GRAY_MID, width=1)
+        y += 30
+
+    # ══════════════════════════════════
+    # 5. TOP 风险条款
+    # ══════════════════════════════════
+    if top_risks:
+        y = draw_section_header(draw, y + 20, "⚠️ 前5大风险条款" if is_cn else "⚠️ Top Risk Clauses", accent_color=C_HIGH)
+        for idx, risk in enumerate(top_risks[:5]):
+            title  = sanitize(risk.get("Title", f"风险 {idx+1}"))
+            detail = sanitize(risk.get("Detail", ""))
+            impact = sanitize(risk.get("Impact", ""))
+            # 编号圆圈
+            draw.ellipse([(60, y + 2), (90, y + 32)], fill=C_HIGH)
+            draw.text((68, y + 4), str(idx + 1), font=f_small, fill=(255, 255, 255))
+            draw.text((100, y + 4), title, font=f_h2, fill=C_HIGH)
+            y += 44
+            if detail:
+                y = wrap_text(draw, detail, 100, y, f_body, W - 160, fill=C_TEXT)
+            if impact:
+                imp_lbl = "对租客影响：" if is_cn else "Impact: "
+                draw.text((100, y), imp_lbl, font=f_small, fill=C_MED)
+                y += 26
+                y = wrap_text(draw, impact, 100, y, f_small, W - 160, fill=C_MED)
+            y += 20
+
+    # ══════════════════════════════════
+    # 6. 签约前谈判建议
+    # ══════════════════════════════════
+    if neg_points:
+        y = draw_section_header(draw, y + 20, "💬 签约前谈判要点" if is_cn else "💬 Negotiation Points", accent_color=C_SECTION)
+        for np_item in neg_points[:8]:
+            draw.text((80, y), "◆", font=f_body, fill=C_GOLD)
+            y = wrap_text(draw, sanitize(str(np_item)), 108, y, f_body, W - 168, fill=C_TEXT)
+            y += 6
+
+    # ══════════════════════════════════
+    # 7. 入住前 & 离租前 清单
+    # ══════════════════════════════════
+    if checkin_list or checkout_list:
+        y = draw_section_header(draw, y + 20, "✅ 行动清单" if is_cn else "✅ Action Checklists", accent_color=C_LOW)
+        cl1, cl2 = (W - 120) // 2, (W - 120) // 2
+        x_left, x_right = 60, 60 + cl1 + 20
+
+        ci_title = "入住前必做" if is_cn else "Before Moving In"
+        co_title = "离租前必做" if is_cn else "Before Moving Out"
+        draw.text((x_left,  y), ci_title, font=f_h2, fill=C_LOW)
+        draw.text((x_right, y), co_title, font=f_h2, fill=C_MED)
+        y += 44
+
+        max_items = max(len(checkin_list), len(checkout_list))
+        for i in range(min(max_items, 8)):
+            row_y = y
+            if i < len(checkin_list):
+                draw.text((x_left, row_y), f"☐ ", font=f_body, fill=C_LOW)
+                wrap_text(draw, sanitize(checkin_list[i]), x_left + 28, row_y, f_body, cl1 - 30, fill=C_TEXT)
+            if i < len(checkout_list):
+                draw.text((x_right, row_y), f"☐ ", font=f_body, fill=C_MED)
+                wrap_text(draw, sanitize(checkout_list[i]), x_right + 28, row_y, f_body, cl2 - 30, fill=C_TEXT)
+            y += 36
+
+    # ══════════════════════════════════
+    # 8. 水印
+    # ══════════════════════════════════
+    wm_layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    wm_draw  = ImageDraw.Draw(wm_layer)
+    for wy in range(0, canvas.size[1], 900):
+        wm_draw.text((160, wy + 350), "Hao Harbour", font=f_wm, fill=(200, 200, 200, 55))
+    rotated = wm_layer.rotate(30, expand=False)
+    canvas.paste(rotated, (0, 0), rotated)
+
+    # ══════════════════════════════════
+    # 9. 页脚免责声明
+    # ══════════════════════════════════
+    y += 60
+    draw.rectangle([(0, y), (W, y + 200)], fill=(240, 240, 245))
+    disclaimer = (
+        "本报告由 AI 辅助生成，仅供参考，不构成任何形式的法律建议。请在签约前务必咨询专业英国执业律师。"
+        "Hao Harbour 对报告内容的准确性、完整性不承担法律责任。"
+        if is_cn else
+        "This report is AI-assisted and for reference only. It does not constitute legal advice. "
+        "Please consult a qualified UK solicitor before signing. Hao Harbour accepts no legal liability."
+    )
+    wrap_text(draw, disclaimer, 60, y + 20, f_small, W - 120, fill=(130, 130, 140))
+    draw.text((60, y + 140), f"Generated by Hao Harbour Intelligence · {__import__('datetime').datetime.now().strftime('%Y-%m-%d')}",
+              font=f_tag, fill=(170, 170, 180))
+
+    final_h = y + 200
+    return canvas.crop((0, 0, W, int(final_h)))
+
 
 
 # --- 初始化带看报告状态 ---
@@ -974,7 +1364,7 @@ if ws:
 
     with t2:
         try:
-            data = ws.get_all_records()
+            data = get_all_records_safe(ws)
         except Exception as e:
             st.error(f"⚠️ Google Sheets 读取失败，请检查服务账号权限或网络连接。\n\n错误详情：{e}")
             data = []
@@ -1374,7 +1764,7 @@ if ws:
         
         st.markdown("#### 1️⃣ 房源横向对比")
         try:
-            all_props = ws.get_all_records()
+            all_props = get_all_records_safe(ws)
         except Exception as e:
             st.error(f"⚠️ Google Sheets 读取失败，请检查服务账号权限或网络连接。\n\n错误详情：{e}")
             all_props = []
@@ -1408,90 +1798,153 @@ if ws:
                     st.info("💡 环境未配置 Pytrends 驱动或访问受限。请确保服务器具备代理或海外环境。")
 
     # =====================================================================
-    # TAB 7 — 🧰 工具箱（合同提取 + 爆款关键词）
+    # =====================================================================
+    # TAB 7 — 🧰 工具箱（合同深度分析 v4.0 + 爆款关键词）
     # =====================================================================
     with t7:
         st.subheader("🧰 让效率翻倍的工具箱")
-        
-        tc1, tc2 = st.columns(2)
-        
+
+        tc1, tc2 = st.columns([3, 2])
+
         with tc1:
-            st.markdown("#### 📄 合同关键信息智能提取")
-            st.info("上传 PDF 合同，AI 将自动分析核心条款及潜在风险。")
+            st.markdown("#### 📄 AST 合同深度分析 v4.0")
+            st.info("上传 PDF 合同，AI 将通过三轮分析：① 精准提取元数据 ② 逐章节深度解读 ③ 综合风险评估 + 行动建议")
             contract_file = st.file_uploader("点击上传 PDF 合同", type="pdf")
-            v3_lang = st.radio("希望分析出的语言 (Language)", ["中文", "English"], horizontal=True)
+            v3_lang = st.radio("报告语言", ["中文", "English"], horizontal=True)
 
-            if st.button("🧠 开始全合同深度解析 (Deep Dive 3.0)", type="primary"):
+            if st.button("🧠 开始深度解析 (约90-120秒)", type="primary", use_container_width=True):
                 if contract_file:
-                    with st.spinner("AI 正在逐章节阅读并提取核心条款 (约60-90秒)..."):
+                    progress = st.progress(0, text="Pass 1/3：提取核心元数据...")
+                    with st.spinner("AI 正在三段式深度分析合同，请耐心等待..."):
                         res = extract_contract_pro(contract_file, target_lang=v3_lang)
-                        if "error" in res:
-                            st.error(res["error"])
-                        else:
-                            # 存储 Deep Dive 数据结构
-                            st.session_state['contract_v3'] = res
-                            st.session_state['contract_v3_lang'] = v3_lang
+                    progress.progress(100, text="分析完成！")
+                    if "error" in res:
+                        st.error(res["error"])
+                    else:
+                        st.session_state['contract_v4'] = res
+                        st.session_state['contract_v4_lang'] = v3_lang
+                        st.success("✅ 深度分析完成！请查看下方结果。")
                 else:
-                    st.warning("请先上传文件")
+                    st.warning("请先上传 PDF 合同文件")
 
-            if 'contract_v3' in st.session_state:
-                st.markdown("---")
-                st.subheader("📋 合同深度解析预览 (可编辑)")
-                st.info("💡 每项内容均可点击修改。如果 AI 漏掉了某些章节，您可以手动添加。")
-                
-                v3 = st.session_state['contract_v3']
-                meta = v3.get('Metadata', {})
-                sections = v3.get('Sections', [])
-
-                # 1. 核心元数据编辑
-                with st.expander("📌 1. 核心条款 (Metadata)", expanded=True):
-                    m1, m2 = st.columns(2)
-                    meta['Landlord'] = m1.text_input("房东 (Landlord)", meta.get('Landlord',''))
-                    meta['Tenant'] = m2.text_input("租客 (Tenant)", meta.get('Tenant',''))
-                    meta['Address'] = st.text_input("房屋地址", meta.get('Address',''))
-                    
-                    d1, d2, d3 = st.columns(3)
-                    meta['StartDate'] = d1.text_input("🏠 起租日期 (Starting Date)", meta.get('StartDate',''))
-                    meta['EndDate'] = d2.text_input("终止日期 (End Date)", meta.get('EndDate',''))
-                    meta['Term'] = d3.text_input("租期时长 (Term)", meta.get('Term',''))
-                    
-                    p1, p2, p3 = st.columns(3)
-                    meta['RentPCM'] = p1.text_input("月租 (Rent PCM)", meta.get('RentPCM',''))
-                    meta['Deposit'] = p2.text_input("押金 (Deposit)", meta.get('Deposit',''))
-                    meta['BreakClause'] = p3.text_input("解约条款 (Break Clause)", meta.get('BreakClause',''))
-
-                # 2. 动态章节编辑
-                st.markdown("#### 📖 逐章节深度摘要 (Clause Breakdown)")
-                new_sections = []
-                for i, sec in enumerate(sections):
-                    with st.expander(f"📍 {sec.get('Heading', '未命名章节')}", expanded=True):
-                        h_val = st.text_input(f"章节标题", sec.get('Heading',''), key=f"h_{i}")
-                        c_val = st.text_area(f"章节要点总结", sec.get('Content',''), height=150, key=f"c_{i}")
-                        if st.button(f"🗑️ 删除此章节", key=f"rem_{i}"):
-                            # 标记删除逻辑（通过不加入 new_sections 实现）
-                            continue
-                        new_sections.append({"Heading": h_val, "Content": c_val})
-                
-                # 添加新章节功能
-                if st.button("➕ 添加一处自定义章节/备注"):
-                    new_sections.append({"Heading": "自定义条款", "Content": ""})
-                
-                v3['Sections'] = new_sections
-
-                # 3. 风险与总结
-                with st.expander("⚠️ 风险提示与核心总结", expanded=True):
-                    v3['Risks'] = st.text_area("潜在风险点", v3.get('Risks',''), height=100)
-                    v3['Summary'] = st.text_area("全篇总结", v3.get('Summary',''), height=80)
+            if 'contract_v4' in st.session_state:
+                v4 = st.session_state['contract_v4']
+                v4_lang = st.session_state.get('contract_v4_lang', '中文')
+                is_cn = (v4_lang == "中文")
+                meta      = v4.get('Metadata', {})
+                sections  = v4.get('Sections', [])
+                risk_data = v4.get('RiskData', {})
 
                 st.markdown("---")
-                if st.button("🎨 导出全合同深度分析 PDF", key="v3_pdf_gen", use_container_width=True):
-                    with st.spinner("正在排版长篇报告 PDF (含水印)..."):
-                        p_img = create_contract_analysis_pdf(v3, lang=st.session_state.get('contract_v3_lang', '中文'))
-                        buf_v3 = BytesIO()
-                        p_img.save(buf_v3, format="PDF", resolution=100.0)
-                        st.download_button("⬇️ 立即下载深度报告 PDF", data=buf_v3.getvalue(), 
-                                           file_name=f"Full_Contract_Report_{datetime.now().strftime('%Y%m%d')}.pdf", 
-                                           mime="application/pdf", key="dl_v3_pdf")
+
+                # ── 整体风险评级 ──
+                overall = risk_data.get('OverallRisk', 'MEDIUM')
+                risk_color = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢"}.get(overall, "🟡")
+                risk_label_cn = {"HIGH": "高风险", "MEDIUM": "中等风险", "LOW": "低风险"}.get(overall, overall)
+                st.markdown(f"### {risk_color} 整体风险评级：**{risk_label_cn if is_cn else overall}**")
+                if risk_data.get('OverallRiskReason'):
+                    st.info(risk_data['OverallRiskReason'])
+                if risk_data.get('OneLiner'):
+                    st.success(f"💡 **一句话总结：** {risk_data['OneLiner']}")
+
+                st.markdown("---")
+
+                # ── 核心元数据 ──
+                with st.expander("📌 核心条款速览（可编辑）", expanded=True):
+                    META_DISPLAY = [
+                        ("房东 Landlord",          "Landlord"),
+                        ("房东代理 Agent",          "LandlordAgent"),
+                        ("租客 Tenant",             "Tenant"),
+                        ("房屋地址 Address",         "Address"),
+                        ("月租 Rent PCM",           "RentPCM"),
+                        ("押金 Deposit",            "Deposit"),
+                        ("押金保护 Deposit Scheme",  "DepositScheme"),
+                        ("起租日期 Start Date",      "StartDate"),
+                        ("终止日期 End Date",        "EndDate"),
+                        ("租期 Term",               "Term"),
+                        ("租金支付日 Pay Day",       "RentPayDay"),
+                        ("支付方式 Pay Method",      "RentPayMethod"),
+                        ("解约条款 Break Clause",    "BreakClause"),
+                        ("提前通知期 Notice Period", "NoticePeriod"),
+                        ("是否需担保人 Guarantor",   "Guarantor"),
+                        ("养宠物 Pets",              "PetsAllowed"),
+                        ("吸烟 Smoking",             "SmokingAllowed"),
+                    ]
+                    cols_meta = st.columns(2)
+                    for idx, (label, key) in enumerate(META_DISPLAY):
+                        with cols_meta[idx % 2]:
+                            meta[key] = st.text_input(label, value=meta.get(key, ""), key=f"meta_{key}")
+
+                # ── 章节深度解读 ──
+                with st.expander("📖 逐章节深度解读（可编辑）", expanded=True):
+                    st.caption("AI 已将合同分章节分析，每节均注明风险等级与关键要点。")
+                    new_sections = []
+                    for i, sec in enumerate(sections):
+                        sec_risk = sec.get('RiskLevel', 'LOW')
+                        emoji = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢"}.get(sec_risk, "🟢")
+                        with st.expander(f"{emoji} {sec.get('Heading', '未命名')} [{sec_risk}]", expanded=(sec_risk == "HIGH")):
+                            h_val = st.text_input("章节标题", sec.get('Heading', ''), key=f"sh_{i}")
+                            c_val = st.text_area("深度解读内容", sec.get('Content', ''), height=180, key=f"sc_{i}")
+                            kp_val = st.text_area("关键要点（每行一条）",
+                                                  "\n".join(sec.get('KeyPoints', [])), height=80, key=f"skp_{i}")
+                            rl_val = st.selectbox("风险等级", ["LOW", "MEDIUM", "HIGH"],
+                                                  index=["LOW", "MEDIUM", "HIGH"].index(sec_risk) if sec_risk in ["LOW","MEDIUM","HIGH"] else 0,
+                                                  key=f"srl_{i}")
+                            if not st.button(f"🗑️ 删除", key=f"sdel_{i}"):
+                                new_sections.append({
+                                    "Heading": h_val, "Content": c_val,
+                                    "KeyPoints": [k.strip() for k in kp_val.split("\n") if k.strip()],
+                                    "RiskLevel": rl_val
+                                })
+                    if st.button("➕ 添加自定义章节"):
+                        new_sections.append({"Heading": "自定义条款", "Content": "", "KeyPoints": [], "RiskLevel": "LOW"})
+                    v4['Sections'] = new_sections
+
+                # ── 风险 & 建议 ──
+                with st.expander("⚠️ 风险评估 & 行动建议（可编辑）", expanded=True):
+                    top_risks = risk_data.get('TopRisks', [])
+                    if top_risks:
+                        st.markdown("**🔴 前5大风险条款：**")
+                        for idx, r in enumerate(top_risks[:5]):
+                            st.markdown(f"**{idx+1}. {r.get('Title','')}**")
+                            st.caption(r.get('Detail',''))
+                            st.warning(f"影响：{r.get('Impact','')}")
+
+                    neg = risk_data.get('NegotiationPoints', [])
+                    if neg:
+                        st.markdown("**💬 签约前谈判要点：**")
+                        for n in neg:
+                            st.markdown(f"◆ {n}")
+
+                    ci = risk_data.get('CheckinChecklist', [])
+                    co = risk_data.get('CheckoutChecklist', [])
+                    if ci or co:
+                        col_ci, col_co = st.columns(2)
+                        with col_ci:
+                            st.markdown("**✅ 入住前必做：**")
+                            for item in ci:
+                                st.markdown(f"☐ {item}")
+                        with col_co:
+                            st.markdown("**📦 离租前必做：**")
+                            for item in co:
+                                st.markdown(f"☐ {item}")
+
+                st.markdown("---")
+                if st.button("🎨 导出完整深度分析 PDF", key="v4_pdf_gen", use_container_width=True, type="primary"):
+                    with st.spinner("正在生成精美 PDF 报告..."):
+                        try:
+                            p_img = create_contract_analysis_pdf(v4, lang=v4_lang)
+                            buf_v4 = BytesIO()
+                            p_img.save(buf_v4, format="PDF", resolution=150.0)
+                            st.download_button(
+                                "⬇️ 立即下载 PDF 报告",
+                                data=buf_v4.getvalue(),
+                                file_name=f"Contract_DeepDive_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+                                mime="application/pdf",
+                                key="dl_v4_pdf"
+                            )
+                        except Exception as e:
+                            st.error(f"PDF 生成失败：{e}")
 
         with tc2:
             st.markdown("#### 📱 小红书爆款优化器")
