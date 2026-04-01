@@ -846,22 +846,25 @@ def extract_contract_pro(pdf_file, target_lang="中文") -> Dict[str, Any]:
 
         pass2_system = f"""你是英国顶级 AST 租赁合同法律分析师。
 {lang_note}
-请对以下合同文本片段进行深度逐条解读，识别并总结以下类别的条款。
-对每个类别，请详细说明：具体要求、金额/时间节点、双方权利义务、潜在风险点。
-如该片段中没有某类别的内容，请跳过该类别（不要输出空内容）。
+请对以下合同文本片段进行分析，识别并总结以下类别的条款。
+如该片段中没有某类别的内容，请跳过（不要输出空内容）。
 输出严格 JSON 数组格式（不要有任何 markdown 包裹）：
 [
   {{
     "Heading": "类别名称",
-    "Content": "详细分析内容（300-600字，要有实质内容，不要笼统概括）",
-    "RiskLevel": "HIGH/MEDIUM/LOW",
-    "KeyPoints": ["要点1", "要点2", "要点3"]
+    "Points": [
+      "• 要点1（含具体金额/日期/天数，直接引用合同原文数字）",
+      "• 要点2",
+      "• 要点3（如有风险请在末尾标注 ⚠️）",
+      "• 要点4（最多5条，每条不超过30字）"
+    ],
+    "RiskLevel": "HIGH/MEDIUM/LOW"
   }}
 ]
-重要：
-- 提及具体金额、日期、天数时必须直接引用合同原文数字
-- 识别任何对租客不利、不寻常或高风险的条款
-- 区分"合同标准条款"和"非标准/特殊条款"
+规则：
+- 每个类别最多输出5个要点，每条不超过30字
+- 必须直接引用合同中的具体金额、日期、天数
+- 对租客不利或高风险的要点末尾加 ⚠️
 - 类别名称使用：{', '.join(clause_groups.keys())}"""
 
         for chunk_name, chunk_text in texts_to_analyze:
@@ -874,18 +877,22 @@ def extract_contract_pro(pdf_file, target_lang="中文") -> Dict[str, Any]:
         merged: Dict[str, Dict] = {}
         for sec in all_sections:
             h = sec.get("Heading", "其他")
+            pts = sec.get("Points", [])
+            # backward compat: if old format has Content, convert to Points
+            if not pts and sec.get("Content"):
+                pts = ["• " + s.strip() for s in sec["Content"].split("。") if s.strip()][:5]
             if h not in merged:
-                merged[h] = {"Heading": h, "Content": sec.get("Content", ""),
-                             "RiskLevel": sec.get("RiskLevel", "LOW"),
-                             "KeyPoints": sec.get("KeyPoints", [])}
+                merged[h] = {"Heading": h, "Points": pts,
+                             "RiskLevel": sec.get("RiskLevel", "LOW")}
             else:
-                existing = merged[h]["Content"]
-                new_content = sec.get("Content", "")
-                if new_content and new_content not in existing:
-                    merged[h]["Content"] = existing + "\n\n" + new_content
-                merged[h]["KeyPoints"] = list(dict.fromkeys(
-                    merged[h].get("KeyPoints", []) + sec.get("KeyPoints", [])
-                ))[:8]
+                # merge points, deduplicate, cap at 5
+                all_pts = merged[h].get("Points", []) + pts
+                seen, uniq = set(), []
+                for p in all_pts:
+                    key = p[:20]
+                    if key not in seen:
+                        seen.add(key); uniq.append(p)
+                merged[h]["Points"] = uniq[:5]
                 # Escalate risk level
                 rl_order = {"HIGH": 2, "MEDIUM": 1, "LOW": 0}
                 if rl_order.get(sec.get("RiskLevel","LOW"),0) > rl_order.get(merged[h]["RiskLevel"],0):
@@ -943,151 +950,152 @@ def extract_contract_pro(pdf_file, target_lang="中文") -> Dict[str, Any]:
 
 
 def create_contract_analysis_pdf(data: Dict, lang: str = "中文") -> Image.Image:
-    """合同深度分析 PDF v4.2 — 彻底修复排版叠字 + 精简内容"""
+    """合同深度分析 PDF v4.3 — bullet point layout, no overflow"""
 
     is_cn = (lang == "中文")
+    W, M  = 1200, 56
+    CW    = W - M * 2        # 1088 px usable width
 
-    # ── 常量 ──
-    W      = 1200
-    M      = 60          # left/right margin
-    CW     = W - M * 2   # content width = 1080
-    LH_H2  = 44
-    LH_BD  = 38
-    LH_SM  = 32
+    # Fixed line heights — never derived from font.size
+    LH_H  = 46   # section header row
+    LH_BD = 36   # body / bullet line
+    LH_SM = 30   # small line
 
-    # ── 颜色 ──
-    WHITE  = (255, 255, 255)
-    C_BG   = (255, 255, 255)
-    C_DARK = (28,  28,  36)
-    C_GOLD = (191, 160, 100)
-    C_GLT  = (248, 248, 250)
-    C_GMD  = (215, 215, 220)
-    C_TXT  = (45,  45,  55)
-    C_SUB  = (110, 110, 122)
-    C_HIGH = (208, 32,  32)
-    C_MED  = (204, 102, 0)
-    C_LOW  = (20,  150, 65)
-    C_BLUE = (28,  60,  172)
-    RC     = {"HIGH": C_HIGH, "MEDIUM": C_MED, "LOW": C_LOW}
-    RCN    = {"HIGH": "高风险", "MEDIUM": "中等风险", "LOW": "低风险"}
-    REN    = {"HIGH": "HIGH", "MEDIUM": "MEDIUM", "LOW": "LOW"}
+    # Colours
+    WH    = (255,255,255)
+    DARK  = (26, 26, 34)
+    GOLD  = (191,160,100)
+    GLT   = (247,247,249)
+    GMD   = (212,212,218)
+    TXT   = (42, 42, 52)
+    SUB   = (108,108,120)
+    HIGH  = (205,30, 30)
+    MED   = (200,98, 0)
+    LOW   = (18, 148,62)
+    BLUE  = (26, 58,170)
+    RC    = {"HIGH":HIGH,"MEDIUM":MED,"LOW":LOW}
+    RCN   = {"HIGH":"高风险","MEDIUM":"中等风险","LOW":"低风险"}
+    REN   = {"HIGH":"HIGH","MEDIUM":"MED","LOW":"LOW"}
 
-    # ── 字体 ──
     try:
-        FT = ImageFont.truetype("simhei.ttf", 42)
-        FH = ImageFont.truetype("simhei.ttf", 30)
-        FB = ImageFont.truetype("simhei.ttf", 24)
-        FS = ImageFont.truetype("simhei.ttf", 20)
-        FG = ImageFont.truetype("simhei.ttf", 17)
-        FW = ImageFont.truetype("simhei.ttf", 110)
+        FT = ImageFont.truetype("simhei.ttf", 40)
+        FH = ImageFont.truetype("simhei.ttf", 28)
+        FB = ImageFont.truetype("simhei.ttf", 23)
+        FS = ImageFont.truetype("simhei.ttf", 19)
+        FG = ImageFont.truetype("simhei.ttf", 16)
+        FW = ImageFont.truetype("simhei.ttf", 108)
     except:
-        FT = FH = FB = FS = FG = FW = ImageFont.load_default()
+        FT=FH=FB=FS=FG=FW = ImageFont.load_default()
 
-    # ── 文字工具 ──
-    _mi = Image.new("RGB", (1, 1))
+    _mi = Image.new("RGB",(1,1))
     _md = ImageDraw.Draw(_mi)
 
     def san(t):
-        if not t or not isinstance(t, str): return ""
-        for a, b in [("£","GBP"),("–","-"),("—","-"),
-                     ("‘","'"),("’","'"),("“",'"'),("”",'"')]:
-            t = t.replace(a, b)
-        return "".join(c for c in t if ord(c) < 0xFFFF)
+        if not t or not isinstance(t,str): return ""
+        for a,b in [("£","GBP"),("\u2013","-"),("\u2014","-"),
+                    ("\u2018","'"),("\u2019","'"),("\u201c",'"'),("\u201d",'"')]:
+            t=t.replace(a,b)
+        return "".join(c for c in t if ord(c)<0xFFFF)
 
-    def tw(txt, font):
+    def px(txt, font):
         try:    return int(_md.textlength(san(txt), font=font))
-        except: return len(txt) * getattr(font, "size", 12)
+        except: return len(txt)*getattr(font,"size",12)
 
-    def split_lines(text, font, max_w):
-        text = san(text)
+    def fit(val, font, max_w):
+        """Truncate to max_w px, appending … if cut."""
+        s = san(str(val))
+        if px(s, font) <= max_w: return s
+        while s and px(s+"…", font) > max_w: s=s[:-1]
+        return s+"…"
+
+    def wrap(text, font, max_w):
+        """Split text into lines that fit max_w."""
+        text=san(text)
         if not text: return []
-        out, cur = [], ""
+        out,cur=[],""
         for ch in text:
-            if tw(cur + ch, font) <= max_w:
-                cur += ch
+            if px(cur+ch, font) <= max_w: cur+=ch
             else:
                 if cur: out.append(cur)
-                cur = ch
+                cur=ch
         if cur: out.append(cur)
         return out
 
-    def dtb(drw, text, x, y, font, max_w, fill, lh, max_lines=9999):
-        """Draw text block. Returns y AFTER last line. Must capture return value."""
-        for ln in split_lines(text, font, max_w)[:max_lines]:
-            drw.text((x, y), ln, font=font, fill=fill)
-            y += lh
+    def draw_lines(drw, text, x, y, font, max_w, fill, lh, max_n=99):
+        """Draw wrapped text. Returns y after last line."""
+        for ln in wrap(text,font,max_w)[:max_n]:
+            drw.text((x,y), ln, font=font, fill=fill)
+            y+=lh
         return y
 
-    def blk_h(text, font, max_w, lh, max_lines=9999):
-        return min(len(split_lines(text, font, max_w)), max_lines) * lh
+    def lines_h(text, font, max_w, lh, max_n=99):
+        return min(len(wrap(text,font,max_w)), max_n)*lh
 
-    def fit_str(val, font, max_w):
-        """Truncate string until it fits in max_w px, append ellipsis if cut."""
-        s = san(str(val))
-        if tw(s, font) <= max_w:
-            return s
-        while s and tw(s + "…", font) > max_w:
-            s = s[:-1]
-        return s + "…"
+    # ── Unpack ──
+    meta     = data.get("Metadata",{})
+    sections = data.get("Sections",[])
+    rd       = data.get("RiskData",{})
+    overall  = rd.get("OverallRisk","MEDIUM")
+    top_r    = rd.get("TopRisks",[])[:5]
+    neg      = rd.get("NegotiationPoints",[])[:5]
+    ci       = rd.get("CheckinChecklist",[])[:5]
+    co       = rd.get("CheckoutChecklist",[])[:5]
+    liner    = san(rd.get("OneLiner",data.get("Summary","")))
+    rc       = RC.get(overall,MED)
+    rl       = (RCN if is_cn else REN).get(overall,overall)
 
-    # ── 数据解包 ──
-    meta      = data.get("Metadata", {})
-    sections  = data.get("Sections", [])
-    rd        = data.get("RiskData", {})
-    overall   = rd.get("OverallRisk", "MEDIUM")
-    top_risks = rd.get("TopRisks", [])[:5]
-    neg_pts   = rd.get("NegotiationPoints", [])[:5]
-    ci_list   = rd.get("CheckinChecklist", [])[:5]
-    co_list   = rd.get("CheckoutChecklist", [])[:5]
-    one_liner = san(rd.get("OneLiner", data.get("Summary", "")))
-    rc        = RC.get(overall, C_MED)
-    rl        = (RCN if is_cn else REN).get(overall, overall)
-
-    # ── 预估画布高度 ──
+    # ── Height estimate ──
     est = 260
-    est += 70 if one_liner else 0
-    est += 60 + 5 * 96 + 40
-    est += 120
-    est += 70
+    est += lines_h(liner,FB,CW-52,LH_BD)+32 if liner else 0
+    est += 60 + 5*96 + 36        # meta grid
+    est += 110                    # risk bar
+    est += 66                     # section header
     for s in sections:
-        words = san(s.get("Content","")).split()
-        body  = " ".join(words[:60])
-        kps   = s.get("KeyPoints",[])[:2]
-        est  += LH_H2 + blk_h(body, FB, CW-40, LH_BD) + len(kps)*LH_SM + 32
-    if top_risks:
-        est += 70 + len(top_risks)*(LH_H2 + LH_SM*2 + 24)
-    est += 70 + len(neg_pts)*LH_BD
-    est += 70 + max(len(ci_list), len(co_list), 1)*(LH_BD+6)
-    est += 240
+        pts = s.get("Points", [])
+        # legacy fallback
+        if not pts:
+            raw = san(s.get("Content",""))
+            pts = ["• "+x.strip() for x in raw.split("。") if x.strip()][:5]
+        est += LH_H + len(pts)*LH_BD + 20
+    if top_r:
+        est += 66+len(top_r)*(LH_H+LH_SM*2+18)
+    est += 66+len(neg)*(LH_BD+4)
+    est += 66+max(len(ci),len(co),1)*(LH_BD+6)
+    est += 220
 
-    canvas = Image.new("RGB", (W, est + 400), C_BG)
+    canvas = Image.new("RGB",(W, est+300), WH)
     draw   = ImageDraw.Draw(canvas)
     y = 0
 
-    # ════ 1. BANNER ════
-    draw.rectangle([(0,0),(W,185)], fill=C_DARK)
-    draw.text((M, 24), "合同深度分析报告" if is_cn else "AST Contract Analysis", font=FT, fill=C_GOLD)
-    draw.text((M, 84), "Hao Harbour Intelligence · AI-Powered Analysis", font=FS, fill=(162,162,178))
-    draw.rounded_rectangle([(W-208,30),(W-M,155)], radius=11, fill=rc)
-    draw.text((W-193,42), "整体风险" if is_cn else "Overall Risk", font=FS, fill=WHITE)
-    draw.text((W-193,74), rl, font=FH, fill=WHITE)
-    y = 200
+    # ══ 1. BANNER ══
+    draw.rectangle([(0,0),(W,182)], fill=DARK)
+    draw.text((M,22), "合同深度分析报告" if is_cn else "AST Contract Analysis", font=FT, fill=GOLD)
+    draw.text((M,80), "Hao Harbour Intelligence · AI-Powered Analysis", font=FS, fill=(160,160,175))
+    draw.rounded_rectangle([(W-204,28),(W-M,152)], radius=11, fill=rc)
+    draw.text((W-190,40), "整体风险" if is_cn else "Overall Risk", font=FS, fill=WH)
+    draw.text((W-190,70), rl, font=FH, fill=WH)
+    y = 196
 
-    # ════ 2. ONE-LINER ════
-    if one_liner:
-        txt = san(one_liner)[:120]
-        bh  = blk_h(txt, FB, CW-52, LH_BD) + 28
-        draw.rounded_rectangle([(M,y),(W-M,y+bh)], radius=8, fill=(238,248,238))
-        draw.text((M+12, y+10), "💡", font=FB, fill=(28,118,48))
-        y = dtb(draw, txt, M+44, y+10, FB, CW-56, (28,110,48), LH_BD)
+    # ══ 2. ONE-LINER ══
+    if liner:
+        bh = lines_h(liner,FB,CW-52,LH_BD)+28
+        draw.rounded_rectangle([(M,y),(W-M,y+bh)], radius=8, fill=(236,248,236))
+        draw.text((M+12,y+10),"💡",font=FB,fill=(26,116,46))
+        y = draw_lines(draw,liner,M+44,y+10,FB,CW-56,(26,110,46),LH_BD)
         y += 18
 
-    # ════ 3. META GRID ════
-    draw.rectangle([(M,y),(W-M,y+46)], fill=C_GOLD)
-    draw.text((M+14,y+10), "📌 核心条款" if is_cn else "📌 Key Terms", font=FH, fill=WHITE)
-    y += 56
+    # ══ 3. META GRID — 3 cols ══
+    # Key fix: CELL_W calculated so 3 cells + 2 gaps = CW exactly
+    GAP     = 10
+    CELL_W  = (CW - GAP*2) // 3      # 356 px
+    VAL_W   = CELL_W - 24            # 332 px — value safe zone
+    COL_X   = [M, M+CELL_W+GAP, M+(CELL_W+GAP)*2]
 
-    META = [
+    draw.rectangle([(M,y),(W-M,y+44)], fill=GOLD)
+    draw.text((M+14,y+9), "📌 核心条款" if is_cn else "📌 Key Terms", font=FH, fill=WH)
+    y += 54
+
+    META=[
         ("房东"    if is_cn else "Landlord",       meta.get("Landlord","—")),
         ("租客"    if is_cn else "Tenant",          meta.get("Tenant","—")),
         ("地址"    if is_cn else "Address",         meta.get("Address","—")),
@@ -1104,143 +1112,143 @@ def create_contract_analysis_pdf(data: Dict, lang: str = "中文") -> Image.Imag
         ("吸烟"    if is_cn else "Smoking",         meta.get("SmokingAllowed","—")),
         ("付租日"  if is_cn else "Pay Day",         meta.get("RentPayDay","—")),
     ]
+    ROW_H = 94
+    for idx,(lbl,val) in enumerate(META):
+        cx = COL_X[idx%3]
+        cy = y+(idx//3)*ROW_H
+        # Draw cell — width = CELL_W, guaranteed not to overlap
+        draw.rounded_rectangle([(cx,cy),(cx+CELL_W,cy+86)],
+                                 radius=7, fill=GLT, outline=GMD)
+        draw.text((cx+10,cy+8),  san(lbl),       font=FG, fill=SUB)
+        draw.text((cx+10,cy+34), fit(val,FB,VAL_W), font=FB, fill=TXT)
 
-    CELL_W  = (CW - 20) // 3   # 353 px
-    VAL_W   = CELL_W - 26      # 327 px — safe value area
-    COL_X   = [M, M + CELL_W + 10, M + (CELL_W + 10) * 2]
-    ROW_H   = 94
+    y += ((len(META)+2)//3)*ROW_H + 28
 
-    for idx, (lbl, val) in enumerate(META):
-        cx = COL_X[idx % 3]
-        cy = y + (idx // 3) * ROW_H
-        draw.rounded_rectangle([(cx,cy),(cx+CELL_W,cy+86)], radius=7, fill=C_GLT, outline=C_GMD)
-        draw.text((cx+12, cy+9),  san(lbl),             font=FG, fill=C_SUB)
-        draw.text((cx+12, cy+36), fit_str(val, FB, VAL_W), font=FB, fill=C_TXT)
-
-    y += ((len(META)+2)//3) * ROW_H + 28
-
-    # ════ 4. RISK REASON (2 lines max) ════
+    # ══ 4. RISK REASON ══
     reason = san(rd.get("OverallRiskReason",""))
     if reason:
-        r_lines = split_lines(reason, FS, CW-28)[:2]
-        bh = LH_H2 + len(r_lines)*LH_SM + 20
-        draw.rounded_rectangle([(M,y),(W-M,y+bh)], radius=8, fill=C_GLT, outline=rc)
+        r_lines = wrap(reason,FS,CW-28)[:2]
+        bh = LH_H + len(r_lines)*LH_SM + 18
+        draw.rounded_rectangle([(M,y),(W-M,y+bh)], radius=8, fill=GLT, outline=rc)
         draw.text((M+14,y+8), ("整体风险：" if is_cn else "Risk: ")+rl, font=FH, fill=rc)
-        cur_y = y + LH_H2 + 6
+        cy2 = y+LH_H+4
         for ln in r_lines:
-            draw.text((M+14,cur_y), ln, font=FS, fill=C_TXT)
-            cur_y += LH_SM
-        y = cur_y + 16
+            draw.text((M+14,cy2), ln, font=FS, fill=TXT); cy2+=LH_SM
+        y = cy2+16
 
-    # ════ 5. SECTIONS ════
-    draw.rectangle([(M,y),(W-M,y+46)], fill=C_BLUE)
-    draw.text((M+14,y+10), "📖 逐章节解读" if is_cn else "📖 Clause Analysis", font=FH, fill=WHITE)
-    y += 60
+    # ══ 5. SECTIONS — bullet points ══
+    draw.rectangle([(M,y),(W-M,y+44)], fill=BLUE)
+    draw.text((M+14,y+9), "📖 逐章节解读" if is_cn else "📖 Clause Analysis", font=FH, fill=WH)
+    y += 58
 
     for sec in sections:
         heading  = san(sec.get("Heading",""))
-        raw_body = san(sec.get("Content",""))
-        kps      = [san(k) for k in sec.get("KeyPoints",[])[:2]]
+        pts      = sec.get("Points",[])
         sec_risk = sec.get("RiskLevel","LOW")
-        if not raw_body: continue
 
-        words = raw_body.split()
-        body  = " ".join(words[:60]) + ("..." if len(words)>60 else "")
+        # legacy fallback: Content → Points
+        if not pts:
+            raw = san(sec.get("Content",""))
+            pts = ["• "+x.strip() for x in raw.split("。") if x.strip()][:5]
+        if not pts: continue
 
-        sc  = RC.get(sec_risk, C_LOW)
-        srl = (RCN if is_cn else REN).get(sec_risk, sec_risk)
+        sc  = RC.get(sec_risk,LOW)
+        srl = (RCN if is_cn else REN).get(sec_risk,sec_risk)
 
-        # heading
-        draw.rectangle([(M,y),(M+5,y+38)], fill=sc)
-        draw.text((M+14,y+5), heading, font=FH, fill=C_BLUE)
-        pill_w = tw(srl, FG) + 22
-        px0    = W - M - pill_w
-        draw.rounded_rectangle([(px0,y+5),(W-M,y+33)], radius=7, fill=sc)
-        draw.text((px0+8,y+9), srl, font=FG, fill=WHITE)
-        y += LH_H2 + 4
+        # heading row
+        draw.rectangle([(M,y),(M+5,y+36)], fill=sc)
+        draw.text((M+14,y+5), heading, font=FH, fill=BLUE)
+        pill_w = px(srl,FG)+20
+        px0    = W-M-pill_w
+        draw.rounded_rectangle([(px0,y+4),(W-M,y+32)], radius=7, fill=sc)
+        draw.text((px0+7,y+7), srl, font=FG, fill=WH)
+        y += LH_H
 
-        # body
-        y = dtb(draw, body, M+14, y, FB, CW-28, C_TXT, LH_BD)
-        y += 6
+        # bullet points — each point on its own line(s)
+        for pt in pts[:5]:
+            pt_clean = san(str(pt)).strip()
+            # Strip leading bullet chars if already present, we'll redraw
+            if pt_clean.startswith(("• ","• ","- ","* ")):
+                pt_clean = pt_clean[2:]
+            # Draw bullet dot
+            draw.text((M+14, y), "•", font=FB, fill=GOLD)
+            # Draw text with wrapping, indent after bullet
+            y = draw_lines(draw, pt_clean, M+36, y, FB, CW-46, TXT, LH_BD, 2)
 
-        # key points
-        for kp in kps:
-            draw.text((M+14,y), "▸", font=FB, fill=C_GOLD)
-            y = dtb(draw, kp[:80], M+36, y, FS, CW-50, C_SUB, LH_SM)
-
-        draw.line([(M+8,y+6),(W-M-8,y+6)], fill=C_GMD, width=1)
+        draw.line([(M+6,y+6),(W-M-6,y+6)], fill=GMD, width=1)
         y += 18
 
-    # ════ 6. TOP RISKS ════
-    if top_risks:
-        y += 8
-        draw.rectangle([(M,y),(W-M,y+46)], fill=C_HIGH)
-        draw.text((M+14,y+10), "⚠️ 前5大风险" if is_cn else "⚠️ Top Risks", font=FH, fill=WHITE)
-        y += 58
-        for idx, risk in enumerate(top_risks):
-            title   = fit_str(risk.get("Title",""), FH, CW-55)
-            detail  = san(risk.get("Detail",""))
-            d_lines = split_lines(detail, FS, CW-55)[:2]
-            draw.ellipse([(M,y+2),(M+26,y+28)], fill=C_HIGH)
-            draw.text((M+7,y+4), str(idx+1), font=FS, fill=WHITE)
-            draw.text((M+36,y+4), title, font=FH, fill=C_HIGH)
-            y += LH_H2 + 2
+    # ══ 6. TOP RISKS ══
+    if top_r:
+        y+=8
+        draw.rectangle([(M,y),(W-M,y+44)], fill=HIGH)
+        draw.text((M+14,y+9), "⚠️ 前5大风险" if is_cn else "⚠️ Top Risks", font=FH, fill=WH)
+        y+=56
+        for idx,risk in enumerate(top_r):
+            title  = fit(risk.get("Title",""), FH, CW-55)
+            detail = san(risk.get("Detail",""))
+            d_lines= wrap(detail,FS,CW-55)[:2]
+            draw.ellipse([(M,y+2),(M+26,y+28)], fill=HIGH)
+            draw.text((M+7,y+4), str(idx+1), font=FS, fill=WH)
+            draw.text((M+36,y+4), title, font=FH, fill=HIGH)
+            y+=LH_H
             for ln in d_lines:
-                draw.text((M+36,y), ln, font=FS, fill=C_TXT)
-                y += LH_SM
-            y += 14
+                draw.text((M+36,y), ln, font=FS, fill=TXT); y+=LH_SM
+            y+=12
 
-    # ════ 7. NEGOTIATION ════
-    if neg_pts:
-        y += 8
-        draw.rectangle([(M,y),(W-M,y+46)], fill=C_BLUE)
-        draw.text((M+14,y+10), "💬 签约前要点" if is_cn else "💬 Before Signing", font=FH, fill=WHITE)
-        y += 56
-        for pt in neg_pts:
-            draw.text((M+10,y), "◆", font=FB, fill=C_GOLD)
-            y = dtb(draw, san(str(pt))[:100], M+34, y, FB, CW-44, C_TXT, LH_BD, 2)
-            y += 4
+    # ══ 7. NEGOTIATION ══
+    if neg:
+        y+=8
+        draw.rectangle([(M,y),(W-M,y+44)], fill=BLUE)
+        draw.text((M+14,y+9), "💬 签约前要点" if is_cn else "💬 Before Signing", font=FH, fill=WH)
+        y+=56
+        for pt in neg:
+            draw.text((M+10,y), "◆", font=FB, fill=GOLD)
+            y=draw_lines(draw, san(str(pt))[:100], M+32,y, FB,CW-42, TXT,LH_BD, 2)
+            y+=4
 
-    # ════ 8. CHECKLISTS (2 cols, single line per item) ════
-    if ci_list or co_list:
-        y += 10
-        draw.rectangle([(M,y),(W-M,y+46)], fill=C_LOW)
-        draw.text((M+14,y+10), "✅ 行动清单" if is_cn else "✅ Checklists", font=FH, fill=WHITE)
-        y += 56
-        HW = (CW - 16) // 2   # 532 px each column
-        xl, xr = M, M + HW + 16
-        ITM_W = HW - 34       # value fits here
-        draw.text((xl,y), "入住前" if is_cn else "Move-In",  font=FH, fill=C_LOW)
-        draw.text((xr,y), "离租前" if is_cn else "Move-Out", font=FH, fill=C_MED)
-        y += LH_H2 + 4
-        for i in range(max(len(ci_list), len(co_list))):
-            if i < len(ci_list):
-                draw.text((xl,y), "☐", font=FB, fill=C_LOW)
-                draw.text((xl+28,y), fit_str(ci_list[i], FB, ITM_W), font=FB, fill=C_TXT)
-            if i < len(co_list):
-                draw.text((xr,y), "☐", font=FB, fill=C_MED)
-                draw.text((xr+28,y), fit_str(co_list[i], FB, ITM_W), font=FB, fill=C_TXT)
-            y += LH_BD + 6
+    # ══ 8. CHECKLISTS ══
+    if ci or co:
+        y+=10
+        draw.rectangle([(M,y),(W-M,y+44)], fill=LOW)
+        draw.text((M+14,y+9), "✅ 行动清单" if is_cn else "✅ Checklists", font=FH, fill=WH)
+        y+=56
+        HW   = (CW-14)//2
+        xl,xr= M, M+HW+14
+        IW   = HW-32
+        draw.text((xl,y), "入住前" if is_cn else "Move-In",  font=FH, fill=LOW)
+        draw.text((xr,y), "离租前" if is_cn else "Move-Out", font=FH, fill=MED)
+        y+=LH_H
+        for i in range(max(len(ci),len(co))):
+            if i<len(ci):
+                draw.text((xl,y),"☐",font=FB,fill=LOW)
+                draw.text((xl+26,y), fit(ci[i],FB,IW), font=FB,fill=TXT)
+            if i<len(co):
+                draw.text((xr,y),"☐",font=FB,fill=MED)
+                draw.text((xr+26,y), fit(co[i],FB,IW), font=FB,fill=TXT)
+            y+=LH_BD+6
 
-    # ════ 9. WATERMARK ════
-    wml = Image.new("RGBA", canvas.size, (0,0,0,0))
-    wmd = ImageDraw.Draw(wml)
-    for wy in range(0, canvas.size[1], 820):
-        wmd.text((130,wy+300), "Hao Harbour", font=FW, fill=(195,195,195,45))
-    rot = wml.rotate(30, expand=False)
-    canvas.paste(rot, (0,0), rot)
+    # ══ 9. WATERMARK ══
+    wml=Image.new("RGBA",canvas.size,(0,0,0,0))
+    wmd=ImageDraw.Draw(wml)
+    for wy in range(0, canvas.size[1], 800):
+        wmd.text((120,wy+290),"Hao Harbour",font=FW,fill=(192,192,192,42))
+    rot=wml.rotate(30,expand=False)
+    canvas.paste(rot,(0,0),rot)
 
-    # ════ 10. FOOTER ════
-    y += 50
-    draw.rectangle([(0,y),(W,y+172)], fill=(236,236,244))
-    disc = ("本报告由 AI 辅助生成，仅供参考，不构成法律建议。请签约前咨询专业英国执业律师。Hao Harbour 不承担法律责任。"
-            if is_cn else
-            "AI-assisted report for reference only. Not legal advice. Consult a UK solicitor. Hao Harbour accepts no liability.")
-    dtb(draw, disc, M, y+18, FS, CW, (126,126,140), LH_SM)
+    # ══ 10. FOOTER ══
+    y+=50
+    draw.rectangle([(0,y),(W,y+168)], fill=(234,234,242))
+    disc=("本报告由 AI 辅助生成，仅供参考，不构成法律建议。请在签约前咨询专业英国执业律师。Hao Harbour 不承担法律责任。"
+          if is_cn else
+          "AI-assisted, for reference only. Not legal advice. Consult a UK solicitor. Hao Harbour accepts no liability.")
+    draw_lines(draw,disc,M,y+16,FS,CW,(124,124,138),LH_SM)
     import datetime as _dt
-    draw.text((M,y+138), f"Hao Harbour Intelligence · {_dt.datetime.now().strftime('%Y-%m-%d')}", font=FG, fill=(162,162,176))
+    draw.text((M,y+136),
+              f"Hao Harbour Intelligence · {_dt.datetime.now().strftime('%Y-%m-%d')}",
+              font=FG, fill=(160,160,174))
 
-    return canvas.crop((0, 0, W, int(y+172)))
+    return canvas.crop((0,0,W,int(y+168)))
 
 
 
