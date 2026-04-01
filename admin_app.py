@@ -1641,7 +1641,7 @@ if ws:
             )
 
     # =====================================================================
-    # TAB 7 — 🧰 工具箱（合同深度分析 v4.0 + 爆款关键词）
+# TAB 7 — 🧰 工具箱（合同深度分析 v4.0 + 爆款关键词）
     # =====================================================================
     with t7:
         st.subheader("🧰 让效率翻倍的工具箱")
@@ -1651,21 +1651,23 @@ if ws:
         with tc1:
             st.markdown("#### 📄 AST 合同深度分析 v4.0")
             st.info("上传 PDF 合同，AI 将通过三轮分析：① 精准提取元数据 ② 逐章节深度解读 ③ 综合风险评估 + 行动建议")
-            contract_file = st.file_uploader("点击上传 PDF 合同", type="pdf")
-            v3_lang = st.radio("报告语言", ["中文", "English"], horizontal=True)
+            contract_file = st.file_uploader("点击上传 PDF 合同", type="pdf", key="v4_uploader")
+            v3_lang = st.radio("报告语言", ["中文", "English"], horizontal=True, key="v4_lang_radio")
 
             if st.button("🧠 开始深度解析 (约90-120秒)", type="primary", use_container_width=True):
                 if contract_file:
-                    progress = st.progress(0, text="Pass 1/3：提取核心元数据...")
+                    progress_bar = st.progress(0, text="准备分析...")
                     with st.spinner("AI 正在三段式深度分析合同，请耐心等待..."):
+                        # 确保 extract_contract_pro 内部有完善的异常处理
                         res = extract_contract_pro(contract_file, target_lang=v3_lang)
-                    progress.progress(100, text="分析完成！")
-                    if "error" in res:
-                        st.error(res["error"])
-                    else:
+                    
+                    if res and "error" not in res:
                         st.session_state['contract_v4'] = res
                         st.session_state['contract_v4_lang'] = v3_lang
+                        progress_bar.progress(100, text="分析完成！")
                         st.success("✅ 深度分析完成！请查看下方结果。")
+                    else:
+                        st.error(f"提取失败: {res.get('error', '未知错误') if res else '远程服务无响应'}")
                 else:
                     st.warning("请先上传 PDF 合同文件")
 
@@ -1673,17 +1675,22 @@ if ws:
                 v4 = st.session_state['contract_v4']
                 v4_lang = st.session_state.get('contract_v4_lang', '中文')
                 is_cn = (v4_lang == "中文")
+                
+                # 安全获取三大板块，防止数据缺失导致报错
                 meta      = v4.get('Metadata', {})
                 sections  = v4.get('Sections', [])
                 risk_data = v4.get('RiskData', {})
+                if not isinstance(risk_data, dict): risk_data = {}
 
                 st.markdown("---")
 
                 # ── 整体风险评级 ──
-                overall = risk_data.get('OverallRisk', 'MEDIUM')
-                risk_color = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢"}.get(overall, "🟡")
-                risk_label_cn = {"HIGH": "高风险", "MEDIUM": "中等风险", "LOW": "低风险"}.get(overall, overall)
-                st.markdown(f"### {risk_color} 整体风险评级：**{risk_label_cn if is_cn else overall}**")
+                overall = str(risk_data.get('OverallRisk', 'MEDIUM')).upper()
+                risk_emoji = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢"}.get(overall, "🟡")
+                risk_label = {"HIGH": "高风险", "MEDIUM": "中等风险", "LOW": "低风险"}.get(overall, overall) if is_cn else overall
+                
+                st.markdown(f"### {risk_emoji} 整体风险评级：**{risk_label}**")
+                
                 if risk_data.get('OverallRiskReason'):
                     st.info(risk_data['OverallRiskReason'])
                 if risk_data.get('OneLiner'):
@@ -1694,98 +1701,92 @@ if ws:
                 # ── 核心元数据 ──
                 with st.expander("📌 核心条款速览（可编辑）", expanded=True):
                     META_DISPLAY = [
-                        ("房东 Landlord",          "Landlord"),
-                        ("房东代理 Agent",          "LandlordAgent"),
-                        ("租客 Tenant",             "Tenant"),
-                        ("房屋地址 Address",         "Address"),
-                        ("月租 Rent PCM",           "RentPCM"),
-                        ("押金 Deposit",            "Deposit"),
-                        ("押金保护 Deposit Scheme",  "DepositScheme"),
-                        ("起租日期 Start Date",      "StartDate"),
-                        ("终止日期 End Date",        "EndDate"),
-                        ("租期 Term",               "Term"),
-                        ("租金支付日 Pay Day",       "RentPayDay"),
-                        ("支付方式 Pay Method",      "RentPayMethod"),
-                        ("解约条款 Break Clause",    "BreakClause"),
-                        ("提前通知期 Notice Period", "NoticePeriod"),
-                        ("是否需担保人 Guarantor",   "Guarantor"),
-                        ("养宠物 Pets",              "PetsAllowed"),
-                        ("吸烟 Smoking",             "SmokingAllowed"),
+                        ("房东 Landlord", "Landlord"), ("房东代理 Agent", "LandlordAgent"),
+                        ("租客 Tenant", "Tenant"), ("房屋地址 Address", "Address"),
+                        ("月租 Rent PCM", "RentPCM"), ("押金 Deposit", "Deposit"),
+                        ("押金保护 Scheme", "DepositScheme"), ("起租日期 Start", "StartDate"),
+                        ("终止日期 End", "EndDate"), ("租期 Term", "Term"),
+                        ("解约条款 Break", "BreakClause"), ("养宠物 Pets", "PetsAllowed")
                     ]
                     cols_meta = st.columns(2)
                     for idx, (label, key) in enumerate(META_DISPLAY):
                         with cols_meta[idx % 2]:
-                            meta[key] = st.text_input(label, value=meta.get(key, ""), key=f"meta_{key}")
+                            # 使用 .get() 确保不报错，并同步回 v4 字典
+                            current_val = str(meta.get(key, ""))
+                            meta[key] = st.text_input(label, value=current_val, key=f"v4_meta_{key}")
 
                 # ── 章节深度解读 ──
                 with st.expander("📖 逐章节深度解读（可编辑）", expanded=True):
                     st.caption("AI 已将合同分章节分析，每节均注明风险等级与关键要点。")
                     new_sections = []
                     for i, sec in enumerate(sections):
-                        sec_risk = sec.get('RiskLevel', 'LOW')
+                        if not isinstance(sec, dict): continue
+                        
+                        sec_risk = str(sec.get('RiskLevel', 'LOW')).upper()
                         emoji = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢"}.get(sec_risk, "🟢")
+                        
                         with st.expander(f"{emoji} {sec.get('Heading', '未命名')} [{sec_risk}]", expanded=(sec_risk == "HIGH")):
-                            h_val = st.text_input("章节标题", sec.get('Heading', ''), key=f"sh_{i}")
-                            c_val = st.text_area("深度解读内容", sec.get('Content', ''), height=180, key=f"sc_{i}")
-                            kp_val = st.text_area("关键要点（每行一条）",
-                                                  "\n".join(sec.get('KeyPoints', [])), height=80, key=f"skp_{i}")
+                            h_val = st.text_input("章节标题", sec.get('Heading', ''), key=f"v4_sh_{i}")
+                            # 修复 KeyError: 'Content' - 使用 get("", ...)
+                            c_val = st.text_area("深度解读内容", sec.get('Content', ''), height=150, key=f"v4_sc_{i}")
+                            
+                            kp_list = sec.get('KeyPoints', [])
+                            kp_str = "\n".join(kp_list) if isinstance(kp_list, list) else str(kp_list)
+                            kp_val = st.text_area("关键要点（每行一条）", kp_str, height=80, key=f"v4_skp_{i}")
+                            
                             rl_val = st.selectbox("风险等级", ["LOW", "MEDIUM", "HIGH"],
                                                   index=["LOW", "MEDIUM", "HIGH"].index(sec_risk) if sec_risk in ["LOW","MEDIUM","HIGH"] else 0,
-                                                  key=f"srl_{i}")
-                            if not st.button(f"🗑️ 删除", key=f"sdel_{i}"):
+                                                  key=f"v4_srl_{i}")
+                            
+                            if not st.checkbox(f"🗑️ 标记删除章节 {i+1}", key=f"v4_sdel_{i}"):
                                 new_sections.append({
                                     "Heading": h_val, "Content": c_val,
                                     "KeyPoints": [k.strip() for k in kp_val.split("\n") if k.strip()],
                                     "RiskLevel": rl_val
                                 })
-                    if st.button("➕ 添加自定义章节"):
+                    
+                    if st.button("➕ 添加自定义章节", key="v4_add_sec"):
                         new_sections.append({"Heading": "自定义条款", "Content": "", "KeyPoints": [], "RiskLevel": "LOW"})
                     v4['Sections'] = new_sections
 
                 # ── 风险 & 建议 ──
                 with st.expander("⚠️ 风险评估 & 行动建议（可编辑）", expanded=True):
                     top_risks = risk_data.get('TopRisks', [])
-                    if top_risks:
+                    if isinstance(top_risks, list) and top_risks:
                         st.markdown("**🔴 前5大风险条款：**")
                         for idx, r in enumerate(top_risks[:5]):
-                            st.markdown(f"**{idx+1}. {r.get('Title','')}**")
-                            st.caption(r.get('Detail',''))
-                            st.warning(f"影响：{r.get('Impact','')}")
+                            if isinstance(r, dict):
+                                st.markdown(f"**{idx+1}. {r.get('Title','')}**")
+                                st.caption(r.get('Detail',''))
+                                if r.get('Impact'): st.warning(f"影响：{r.get('Impact','')}")
 
-                    neg = risk_data.get('NegotiationPoints', [])
-                    if neg:
-                        st.markdown("**💬 签约前谈判要点：**")
-                        for n in neg:
-                            st.markdown(f"◆ {n}")
-
-                    ci = risk_data.get('CheckinChecklist', [])
-                    co = risk_data.get('CheckoutChecklist', [])
-                    if ci or co:
-                        col_ci, col_co = st.columns(2)
-                        with col_ci:
-                            st.markdown("**✅ 入住前必做：**")
-                            for item in ci:
-                                st.markdown(f"☐ {item}")
-                        with col_co:
-                            st.markdown("**📦 离租前必做：**")
-                            for item in co:
-                                st.markdown(f"☐ {item}")
+                    for label, key, icon in [("💬 签约前谈判要点", "NegotiationPoints", "◆"), 
+                                            ("✅ 入住前必做", "CheckinChecklist", "☐"), 
+                                            ("📦 离租前必做", "CheckoutChecklist", "☐")]:
+                        items = risk_data.get(key, [])
+                        if items:
+                            st.markdown(f"**{label}：**")
+                            for item in items: st.markdown(f"{icon} {item}")
 
                 st.markdown("---")
                 if st.button("🎨 导出完整深度分析 PDF", key="v4_pdf_gen", use_container_width=True, type="primary"):
                     with st.spinner("正在生成精美 PDF 报告..."):
                         try:
+                            # 这里调用你的绘图函数，确保它能处理 dict 里的 None 值
                             p_img = create_contract_analysis_pdf(v4, lang=v4_lang)
                             buf_v4 = BytesIO()
+                            # 建议先转成 RGB 模式防止 PDF 转换报错
+                            if p_img.mode in ("RGBA", "P"): p_img = p_img.convert("RGB")
                             p_img.save(buf_v4, format="PDF", resolution=150.0)
+                            
                             st.download_button(
                                 "⬇️ 立即下载 PDF 报告",
                                 data=buf_v4.getvalue(),
                                 file_name=f"Contract_DeepDive_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
                                 mime="application/pdf",
-                                key="dl_v4_pdf"
+                                key="dl_v4_pdf_final"
                             )
                         except Exception as e:
-                            st.error(f"PDF 生成失败：{e}")
+                            st.error(f"PDF 生成失败，请检查字体文件或数据完整性。错误详情: {e}")
 
 # --- End of Admin Tool ---
