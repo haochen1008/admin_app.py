@@ -1042,9 +1042,12 @@ def create_contract_analysis_pdf(data: Dict, lang: str = "中文") -> Image.Imag
     def san(t):
         if not t or not isinstance(t,str): return ""
         for a,b in [("£","GBP"),("\u2013","-"),("\u2014","-"),
-                    ("\u2018","'"),("\u2019","'"),("\u201c",'"'),("\u201d",'"')]:
+                    ("\u2018","'"),("\u2019","'"),("\u201c",'"'),("\u201d",'"'),
+                    ("⚠️","[!]"),("⚠","[!]"),("✓","OK"),("✗","X"),
+                    ("①","1."),("②","2."),("③","3."),("④","4."),("⑤","5.")]:
             t=t.replace(a,b)
-        return "".join(c for c in t if ord(c)<0xFFFF)
+        # Remove any remaining emoji / non-BMP characters (keep ASCII + CJK)
+        return "".join(c for c in t if ord(c) < 0x3000 or 0x4E00 <= ord(c) <= 0x9FFF)
 
     def px(txt, font):
         try:    return int(_md.textlength(san(txt), font=font))
@@ -1149,7 +1152,7 @@ def create_contract_analysis_pdf(data: Dict, lang: str = "中文") -> Image.Imag
     assert COL_X[2] + CELL_W <= W - M + 2  # +2 for rounding tolerance
 
     draw.rectangle([(M,y),(W-M,y+44)], fill=GOLD)
-    draw.text((M+14,y+9), "📌 核心条款" if is_cn else "📌 Key Terms", font=FH, fill=WH)
+    draw.text((M+14,y+9), "【核心条款】" if is_cn else "[ Key Terms ]", font=FH, fill=WH)
     y += 54
 
     META=[
@@ -1197,7 +1200,7 @@ def create_contract_analysis_pdf(data: Dict, lang: str = "中文") -> Image.Imag
 
     # ══ 5. SECTIONS — bullet points ══
     draw.rectangle([(M,y),(W-M,y+44)], fill=BLUE)
-    draw.text((M+14,y+9), "📖 逐章节解读" if is_cn else "📖 Clause Analysis", font=FH, fill=WH)
+    draw.text((M+14,y+9), "【逐章节解读】" if is_cn else "[ Clause Analysis ]", font=FH, fill=WH)
     y += 58
 
     for sec in sections:
@@ -1226,13 +1229,15 @@ def create_contract_analysis_pdf(data: Dict, lang: str = "中文") -> Image.Imag
         # bullet points — each point on its own line(s)
         for pt in pts[:5]:
             pt_clean = san(str(pt)).strip()
-            # Strip leading bullet chars if already present, we'll redraw
-            if pt_clean.startswith(("• ","• ","- ","* ")):
+            # Strip any leading bullet/dash chars
+            if pt_clean.startswith(("• ","- ","* ","· ")):
                 pt_clean = pt_clean[2:]
-            # Draw bullet dot
-            draw.text((M+14, y), "•", font=FB, fill=GOLD)
-            # Draw text with wrapping, indent after bullet
-            y = draw_lines(draw, pt_clean, M+36, y, FB, CW-46, TXT, LH_BD, 2)
+            elif pt_clean.startswith(("•","·")):
+                pt_clean = pt_clean[1:].strip()
+            # Draw marker (simhei-safe)
+            draw.text((M+14, y), ">>", font=FG, fill=GOLD)
+            # Draw text
+            y = draw_lines(draw, pt_clean, M+44, y, FB, CW-54, TXT, LH_BD, 2)
 
         draw.line([(M+6,y+6),(W-M-6,y+6)], fill=GMD, width=1)
         y += 18
@@ -1241,7 +1246,7 @@ def create_contract_analysis_pdf(data: Dict, lang: str = "中文") -> Image.Imag
     if top_r:
         y+=8
         draw.rectangle([(M,y),(W-M,y+44)], fill=HIGH)
-        draw.text((M+14,y+9), "⚠️ 前5大风险" if is_cn else "⚠️ Top Risks", font=FH, fill=WH)
+        draw.text((M+14,y+9), "【前5大风险】" if is_cn else "[ Top Risks ]", font=FH, fill=WH)
         y+=56
         for idx,risk in enumerate(top_r):
             title  = fit(risk.get("Title",""), FH, CW-55)
@@ -1259,33 +1264,41 @@ def create_contract_analysis_pdf(data: Dict, lang: str = "中文") -> Image.Imag
     if neg:
         y+=8
         draw.rectangle([(M,y),(W-M,y+44)], fill=BLUE)
-        draw.text((M+14,y+9), "💬 签约前要点" if is_cn else "💬 Before Signing", font=FH, fill=WH)
+        draw.text((M+14,y+9), "【签约前要点】" if is_cn else "[ Before Signing ]", font=FH, fill=WH)
         y+=56
         for pt in neg:
-            draw.text((M+10,y), "◆", font=FB, fill=GOLD)
-            y=draw_lines(draw, san(str(pt))[:100], M+32,y, FB,CW-42, TXT,LH_BD, 2)
+            draw.text((M+10,y), ">>", font=FG, fill=GOLD)
+            y=draw_lines(draw, san(str(pt))[:120], M+34,y, FB,CW-44, TXT,LH_BD, 2)
             y+=4
 
     # ══ 8. CHECKLISTS ══
     if ci or co:
         y+=10
         draw.rectangle([(M,y),(W-M,y+44)], fill=LOW)
-        draw.text((M+14,y+9), "✅ 行动清单" if is_cn else "✅ Checklists", font=FH, fill=WH)
+        draw.text((M+14,y+9), "【行动清单】" if is_cn else "[ Action Checklists ]", font=FH, fill=WH)
         y+=56
         HW   = (CW-14)//2
         xl,xr= M, M+HW+14
-        IW   = HW-32
+        IW   = HW-36      # text width inside each column
         draw.text((xl,y), "入住前" if is_cn else "Move-In",  font=FH, fill=LOW)
         draw.text((xr,y), "离租前" if is_cn else "Move-Out", font=FH, fill=MED)
         y+=LH_H
         for i in range(max(len(ci),len(co))):
+            row_y = y
+            left_h = right_h = LH_BD  # default single-line height
             if i<len(ci):
-                draw.text((xl,y),"☐",font=FB,fill=LOW)
-                draw.text((xl+26,y), fit(ci[i],FB,IW), font=FB,fill=TXT)
+                draw.text((xl,row_y),"[ ]",font=FB,fill=LOW)
+                ci_lines = wrap(san(ci[i]), FB, IW)[:2]
+                for li, ln in enumerate(ci_lines):
+                    draw.text((xl+36, row_y+li*LH_BD), ln, font=FB, fill=TXT)
+                left_h = len(ci_lines)*LH_BD
             if i<len(co):
-                draw.text((xr,y),"☐",font=FB,fill=MED)
-                draw.text((xr+26,y), fit(co[i],FB,IW), font=FB,fill=TXT)
-            y+=LH_BD+6
+                draw.text((xr,row_y),"[ ]",font=FB,fill=MED)
+                co_lines = wrap(san(co[i]), FB, IW)[:2]
+                for li, ln in enumerate(co_lines):
+                    draw.text((xr+36, row_y+li*LH_BD), ln, font=FB, fill=TXT)
+                right_h = len(co_lines)*LH_BD
+            y += max(left_h, right_h) + 8
 
     # ══ 9. WATERMARK ══
     wml=Image.new("RGBA",canvas.size,(0,0,0,0))
@@ -1298,7 +1311,7 @@ def create_contract_analysis_pdf(data: Dict, lang: str = "中文") -> Image.Imag
     # ══ 10. FOOTER ══
     y+=50
     draw.rectangle([(0,y),(W,y+168)], fill=(234,234,242))
-    disc=("本报告由 AI 辅助生成，仅供参考，不构成法律建议。请在签约前咨询专业英国执业律师。Hao Harbour 不承担法律责任。"
+    disc=("本报告仅供参考，不构成法律建议。请在签约前咨询专业英国执业律师。Hao Harbour 不承担法律责任。"
           if is_cn else
           "AI-assisted, for reference only. Not legal advice. Consult a UK solicitor. Hao Harbour accepts no liability.")
     draw_lines(draw,disc,M,y+16,FS,CW,(124,124,138),LH_SM)
