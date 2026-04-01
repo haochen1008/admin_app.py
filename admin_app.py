@@ -707,11 +707,23 @@ def get_market_trends(keyword: str = "London Rent"):
 # --- 4h. 合同提取 (AI) ---
 
 # --- 4h. 合同助手：智能提取与分析 ---
-def parse_ai_json(text: str) -> Dict[str, Any]:
-    """解析 AI 返回的 JSON，处理可能的 Markdown 代码块"""
+def parse_ai_json(text: str):
+    """解析 AI 返回的 JSON，处理 Markdown 代码块和列表/字典两种格式"""
     try:
-        clean = re.sub(r"```json\n|\n```|```", "", text).strip()
-        return json.loads(clean)
+        clean = re.sub(r"```json\s*|\s*```", "", text).strip()
+        # Remove any leading/trailing non-JSON characters
+        # Find first [ or { 
+        for start_ch, end_ch in [('[', ']'), ('{', '}')]:
+            idx = clean.find(start_ch)
+            if idx >= 0:
+                # find matching close
+                sub = clean[idx:]
+                try:
+                    result = json.loads(sub)
+                    return result
+                except:
+                    pass
+        return {}
     except:
         return {}
 
@@ -765,36 +777,37 @@ def extract_contract_pro(pdf_file, target_lang="中文") -> Dict[str, Any]:
         # ════════════════════════════════════════
         pass1_system = f"""你是英国顶级租赁法律专家，专注提取 AST（Assured Shorthold Tenancy）合同中的核心元数据。
 {lang_note}
-请从合同文本中精准提取以下字段，输出严格的 JSON 格式（不要有任何 markdown 包裹）：
+请仔细阅读全文，从合同文本中精准提取以下字段。
+重要：DPS/TDS/mydeposits 等押金保护计划通常出现在合同中段或附件里，请务必通读全文寻找。
+输出严格的 JSON 格式（不要有任何 markdown 包裹，不要输出任何其他文字）：
 {{
   "Landlord": "房东全名",
-  "LandlordAddress": "房东联系地址",
-  "LandlordAgent": "房东代理/中介公司（若有）",
+  "LandlordAgent": "房东代理/中介公司（若有，否则填 未提及）",
   "Tenant": "所有租客全名（多人用逗号分隔）",
-  "TenantID": "租客身份证明/Passport 要求（若提及）",
   "Address": "出租房屋完整地址（含邮编）",
   "StartDate": "起租日期",
   "EndDate": "合同终止日期",
-  "Term": "租期时长（如 12 months, 6 months）",
-  "RentPCM": "月租金额（如 £2,500 per calendar month）",
-  "RentPayDay": "租金支付日（每月几号）",
-  "RentPayMethod": "支付方式（如 standing order/bank transfer）",
-  "Deposit": "押金金额",
-  "DepositScheme": "押金保护计划（如 DPS/TDS/mydeposits）",
-  "BreakClause": "解约条款详情（起效时间、提前通知期、双方是否均可行使）",
-  "NoticePeriod": "到期不续约的提前通知要求",
-  "HoldingDeposit": "预订押金（若有）",
-  "RentReview": "租金审查条款（若有）",
-  "PermittedOccupants": "允许同住人员限制（若有）",
-  "PetsAllowed": "是否允许养宠物",
-  "SmokingAllowed": "是否允许吸烟",
-  "Guarantor": "是否需要担保人（Guarantor）"
+  "Term": "租期时长（如 12 months）",
+  "RentPCM": "月租金额（如 GBP1,625 per calendar month）",
+  "RentPayDay": "租金支付日（如 every month in advance / 1st of each month）",
+  "RentPayMethod": "支付方式（如 standing order / bank transfer）",
+  "RentAdvance": "是否要求提前多个月支付（如 6 months in advance）若无则填 按月支付",
+  "Deposit": "押金金额（如 GBP1,875）",
+  "DepositScheme": "押金保护计划全名（如 The Deposit Protection Service (DPS)）— 请在全文中搜索 DPS/TDS/mydeposits/deposit protection",
+  "BreakClause": "解约条款详情（起效时间、提前通知期）若无则填 未提及",
+  "NoticePeriod": "到期续约/终止的提前通知要求（如 2 months notice）",
+  "PetsAllowed": "是否允许养宠物（明确说明 Yes/No/未提及）",
+  "SmokingAllowed": "是否允许吸烟（明确说明 Yes/No/未提及）",
+  "Guarantor": "是否需要担保人（Yes/No/未提及）",
+  "RentPayDay": "租金支付日"
 }}
-如某字段合同中未提及，填写 "未提及"。务必不要猜测，只提取合同中明确出现的信息。"""
+如某字段合同中真的未提及，填写 "未提及"。绝对不要猜测，只提取合同中明确出现的信息。"""
 
-        pass1_raw = call_ai(pass1_system, text_head + ("\n\n[合同尾部补充]\n" + text_tail if text_tail else ""))
+        # Send full text for pass1 (metadata can be anywhere in contract)
+        pass1_input = full_text[:12000] + ("\n\n[合同尾部]\n" + text_tail if text_tail else "")
+        pass1_raw = call_ai(pass1_system, pass1_input)
         metadata = parse_ai_json(pass1_raw)
-        if not metadata:
+        if not isinstance(metadata, dict) or not metadata:
             metadata = {"RentPCM": "解析失败，请手动填写", "Address": "解析失败，请手动填写"}
 
         # ════════════════════════════════════════
@@ -846,32 +859,39 @@ def extract_contract_pro(pdf_file, target_lang="中文") -> Dict[str, Any]:
 
         pass2_system = f"""你是英国顶级 AST 租赁合同法律分析师。
 {lang_note}
-请对以下合同文本片段进行分析，识别并总结以下类别的条款。
-如该片段中没有某类别的内容，请跳过（不要输出空内容）。
-输出严格 JSON 数组格式（不要有任何 markdown 包裹）：
+请仔细阅读以下合同文本片段，识别并分析以下类别的条款。
+如该片段中没有某类别的内容，请跳过（不要输出空数组项）。
+
+输出严格 JSON 数组格式（直接输出 [ ] 开头，不要任何 markdown 包裹，不要任何其他文字）：
 [
   {{
-    "Heading": "类别名称",
+    "Heading": "类别名称（从下方列表选择）",
     "Points": [
-      "• 要点1（含具体金额/日期/天数，直接引用合同原文数字）",
-      "• 要点2",
-      "• 要点3（如有风险请在末尾标注 ⚠️）",
-      "• 要点4（最多5条，每条不超过30字）"
+      "月租 GBP1,625，每月提前支付 ⚠️",
+      "逾期14天收取违约金 ⚠️",
+      "需通过银行转账或Standing Order支付",
+      "房东银行账户：Nexis Property，账号03964590"
     ],
-    "RiskLevel": "HIGH/MEDIUM/LOW"
+    "RiskLevel": "HIGH"
   }}
 ]
+
 规则：
-- 每个类别最多输出5个要点，每条不超过30字
-- 必须直接引用合同中的具体金额、日期、天数
-- 对租客不利或高风险的要点末尾加 ⚠️
-- 类别名称使用：{', '.join(clause_groups.keys())}"""
+- 每类别3-5条要点，每条15-40字
+- 必须引用合同中的具体金额、日期、天数、条款编号
+- 对租客不利或高风险要点末尾加 ⚠️
+- RiskLevel 只能是 HIGH / MEDIUM / LOW
+- 类别名称只能从以下选择：{', '.join(clause_groups.keys())}
+- 只输出 JSON，不要解释，不要前言后语"""
 
         for chunk_name, chunk_text in texts_to_analyze:
             chunk_raw = call_ai(pass2_system, f"[{chunk_name}]\n\n{chunk_text}")
-            chunk_sections = parse_ai_json(chunk_raw)
-            if isinstance(chunk_sections, list):
-                all_sections.extend(chunk_sections)
+            chunk_result = parse_ai_json(chunk_raw)
+            # parse_ai_json may return list or dict
+            if isinstance(chunk_result, list):
+                all_sections.extend(chunk_result)
+            elif isinstance(chunk_result, dict) and chunk_result:
+                all_sections.append(chunk_result)
 
         # 合并相同 Heading 的 sections
         merged: Dict[str, Dict] = {}
@@ -1085,11 +1105,13 @@ def create_contract_analysis_pdf(data: Dict, lang: str = "中文") -> Image.Imag
         y += 18
 
     # ══ 3. META GRID — 3 cols ══
-    # Key fix: CELL_W calculated so 3 cells + 2 gaps = CW exactly
-    GAP     = 10
-    CELL_W  = (CW - GAP*2) // 3      # 356 px
-    VAL_W   = CELL_W - 24            # 332 px — value safe zone
-    COL_X   = [M, M+CELL_W+GAP, M+(CELL_W+GAP)*2]
+    # 3 equal cells that fit exactly within margins
+    GAP     = 8
+    CELL_W  = (CW - GAP * 2) // 3          # floor division → 357 px
+    VAL_W   = CELL_W - 26                  # text safe zone inside cell
+    COL_X   = [M, M + CELL_W + GAP, M + (CELL_W + GAP) * 2]
+    # Verify third column right edge never exceeds W-M
+    assert COL_X[2] + CELL_W <= W - M + 2  # +2 for rounding tolerance
 
     draw.rectangle([(M,y),(W-M,y+44)], fill=GOLD)
     draw.text((M+14,y+9), "📌 核心条款" if is_cn else "📌 Key Terms", font=FH, fill=WH)
