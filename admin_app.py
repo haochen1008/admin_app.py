@@ -943,324 +943,325 @@ def extract_contract_pro(pdf_file, target_lang="中文") -> Dict[str, Any]:
 
 
 def create_contract_analysis_pdf(data: Dict, lang: str = "中文") -> Image.Image:
-    """生成合同深度分析 PDF 长图 v4.0 — 带风险评级、要点列表、行动清单"""
+    """合同深度分析 PDF v4.1 — 修复排版，精简内容"""
 
     is_cn = (lang == "中文")
 
-    # ── 颜色系统 ──
-    C_BG       = (255, 255, 255)
-    C_DARK     = (28,  28,  36)
-    C_GOLD     = (191, 160, 100)
-    C_GOLD_LT  = (245, 235, 210)
-    C_GRAY_LT  = (248, 248, 250)
-    C_GRAY_MID = (220, 220, 225)
-    C_TEXT     = (45,  45,  55)
-    C_SUB      = (110, 110, 120)
-    C_HIGH     = (220, 38,  38)    # HIGH risk — red
-    C_MED      = (217, 119, 6)     # MEDIUM risk — amber
-    C_LOW      = (22,  163, 74)    # LOW risk — green
-    C_SECTION  = (30,  64,  175)   # section heading — blue
+    # ── 颜色 ──
+    C_BG      = (255, 255, 255)
+    C_DARK    = (28,  28,  36)
+    C_GOLD    = (191, 160, 100)
+    C_GRAY_LT = (248, 248, 250)
+    C_GRAY_MD = (218, 218, 222)
+    C_TEXT    = (45,  45,  55)
+    C_SUB     = (110, 110, 120)
+    C_HIGH    = (210, 35,  35)
+    C_MED     = (210, 110, 6)
+    C_LOW     = (22,  155, 68)
+    C_BLUE    = (30,  64,  175)
+    RISK_COL  = {"HIGH": C_HIGH, "MEDIUM": C_MED, "LOW": C_LOW}
+    RISK_CN   = {"HIGH": "高风险", "MEDIUM": "中等风险", "LOW": "低风险"}
+    RISK_EN   = {"HIGH": "HIGH RISK", "MEDIUM": "MED RISK", "LOW": "LOW RISK"}
 
-    RISK_COLOR = {"HIGH": C_HIGH, "MEDIUM": C_MED, "LOW": C_LOW}
-    RISK_LABEL_CN  = {"HIGH": "高风险", "MEDIUM": "中等风险", "LOW": "低风险"}
-    RISK_LABEL_EN  = {"HIGH": "HIGH RISK", "MEDIUM": "MEDIUM RISK", "LOW": "LOW RISK"}
+    W = 1200
+    MARGIN = 60
+    CONTENT_W = W - MARGIN * 2   # 1080px
 
     # ── 字体 ──
     try:
-        f_title   = ImageFont.truetype("simhei.ttf", 46)
-        f_h1      = ImageFont.truetype("simhei.ttf", 36)
-        f_h2      = ImageFont.truetype("simhei.ttf", 30)
-        f_body    = ImageFont.truetype("simhei.ttf", 26)
-        f_small   = ImageFont.truetype("simhei.ttf", 22)
-        f_tag     = ImageFont.truetype("simhei.ttf", 20)
-        f_wm      = ImageFont.truetype("simhei.ttf", 130)
+        f_title  = ImageFont.truetype("simhei.ttf", 44)
+        f_h1     = ImageFont.truetype("simhei.ttf", 34)
+        f_h2     = ImageFont.truetype("simhei.ttf", 28)
+        f_body   = ImageFont.truetype("simhei.ttf", 24)
+        f_small  = ImageFont.truetype("simhei.ttf", 20)
+        f_tag    = ImageFont.truetype("simhei.ttf", 18)
+        f_wm     = ImageFont.truetype("simhei.ttf", 120)
     except:
         f_title = f_h1 = f_h2 = f_body = f_small = f_tag = f_wm = ImageFont.load_default()
 
-    # ── 辅助函数 ──
-    _dummy_img  = Image.new("RGB", (1, 1))
-    _dummy_draw = ImageDraw.Draw(_dummy_img)
+    # Line heights — explicit, never auto-calculated from font.size
+    LH_BODY  = 36   # 24px font + 12 gap
+    LH_SMALL = 30   # 20px font + 10 gap
+    LH_H2    = 40   # 28px font + 12 gap
+
+    # ── Helpers ──
+    _m = Image.new("RGB", (1, 1))
+    _d = ImageDraw.Draw(_m)
 
     def sanitize(t):
         if not t or not isinstance(t, str): return ""
-        t = t.replace("£", "GBP").replace("–", "-").replace("—", "-").replace("’", "'").replace("“", '"').replace("”", '"')
+        t = (t.replace("£", "GBP").replace("\u2013", "-").replace("\u2014", "-")
+              .replace("\u2018", "'").replace("\u2019", "'")
+              .replace("\u201c", '"').replace("\u201d", '"'))
         return "".join(c for c in t if ord(c) < 0xFFFF)
 
-    def wrap_text(draw_obj, text, x, y, font, max_w, fill=None, line_gap=8):
-        if fill is None: fill = C_TEXT
+    def text_width(txt, font):
+        try: return int(_d.textlength(sanitize(txt), font=font))
+        except: return len(txt) * (getattr(font, 'size', 12))
+
+    def wrap_lines(text, font, max_w):
+        """Split text into lines that fit max_w. Returns list of strings."""
         text = sanitize(text)
-        if not text: return y
-        lines_out = []
-        cur = ""
+        if not text: return []
+        result, cur = [], ""
         for ch in text:
-            test = cur + ch
-            try:
-                w = _dummy_draw.textlength(test, font=font)
-            except:
-                w = len(test) * (font.size if hasattr(font, "size") else 12)
-            if w <= max_w:
-                cur = test
+            if text_width(cur + ch, font) <= max_w:
+                cur += ch
             else:
-                if cur: lines_out.append(cur)
+                if cur: result.append(cur)
                 cur = ch
-        if cur: lines_out.append(cur)
-        for ln in lines_out:
-            draw_obj.text((x, y), ln, font=font, fill=fill)
-            y += (font.size if hasattr(font, "size") else 14) + line_gap
+        if cur: result.append(cur)
+        return result
+
+    def put_text(draw, text, x, y, font, max_w, fill, line_h, max_lines=999):
+        """Draw wrapped text. Returns new y AFTER last line."""
+        for ln in wrap_lines(text, font, max_w)[:max_lines]:
+            draw.text((x, y), ln, font=font, fill=fill)
+            y += line_h
         return y
 
-    def draw_pill(draw_obj, x, y, label, color, font):
-        """小圆角标签"""
-        try:
-            tw = _dummy_draw.textlength(label, font=font)
-        except:
-            tw = len(label) * 10
-        pad_x, pad_y = 14, 6
-        w, h = int(tw) + pad_x * 2, (font.size if hasattr(font, "size") else 14) + pad_y * 2
-        r8 = 10
-        draw_obj.rounded_rectangle([x, y, x + w, y + h], radius=r8, fill=color)
-        draw_obj.text((x + pad_x, y + pad_y), label, font=font, fill=(255, 255, 255))
-        return w + 12
+    def block_height(text, font, max_w, line_h, max_lines=999):
+        """How many px will put_text consume?"""
+        n = min(len(wrap_lines(text, font, max_w)), max_lines)
+        return n * line_h
 
-    def draw_section_header(draw_obj, y, title, accent_color=None, canvas_w=1200):
-        if accent_color is None: accent_color = C_GOLD
-        # 左侧竖条 + 文字
-        draw_obj.rectangle([(60, y), (70, y + 44)], fill=accent_color)
-        draw_obj.text((86, y + 4), sanitize(title), font=f_h1, fill=C_DARK)
-        y += 60
-        draw_obj.line([(60, y - 6), (canvas_w - 60, y - 6)], fill=C_GRAY_MID, width=1)
-        return y
+    # ── Unpack data ──
+    meta       = data.get("Metadata", {})
+    sections   = data.get("Sections", [])
+    risk_data  = data.get("RiskData", {})
+    overall    = risk_data.get("OverallRisk", "MEDIUM")
+    top_risks  = risk_data.get("TopRisks", [])[:5]
+    neg_pts    = risk_data.get("NegotiationPoints", [])[:6]
+    ci_list    = risk_data.get("CheckinChecklist", [])[:6]
+    co_list    = risk_data.get("CheckoutChecklist", [])[:6]
+    one_liner  = sanitize(risk_data.get("OneLiner", data.get("Summary", "")))
 
-    def estimate_height(text, font, max_w, line_gap=8):
-        """估算文字块高度"""
-        dummy = Image.new("RGB", (1, 1))
-        dd = ImageDraw.Draw(dummy)
-        text = sanitize(text)
-        if not text: return 0
-        cur, h = "", 0
-        lh = (font.size if hasattr(font, "size") else 14) + line_gap
-        for ch in text:
-            test = cur + ch
-            try: w = _dummy_draw.textlength(test, font=font)
-            except: w = len(test) * 10
-            if w <= max_w: cur = test
-            else: h += lh; cur = ch
-        return h + lh
-
-    # ── 从 data 解包 ──
-    meta      = data.get("Metadata", {})
-    sections  = data.get("Sections", [])
-    risk_data = data.get("RiskData", {})
-    overall_risk = risk_data.get("OverallRisk", "MEDIUM")
-    top_risks    = risk_data.get("TopRisks", [])
-    neg_points   = risk_data.get("NegotiationPoints", [])
-    checkin_list = risk_data.get("CheckinChecklist", [])
-    checkout_list= risk_data.get("CheckoutChecklist", [])
-    one_liner    = risk_data.get("OneLiner", data.get("Summary", ""))
-
-    # ── 预估总高度 ──
-    est_h = 600   # header + meta
-    est_h += 300  # overall risk block
+    # ── Pre-calculate total canvas height ──
+    est = 0
+    est += 200          # banner
+    est += 30           # gap
+    # meta grid: ceil(15/3) = 5 rows × 90px
+    est += 50 + 5 * 92 + 40
+    # overall risk bar
+    est += 100 + 20
+    # sections
     for s in sections:
-        est_h += 80 + estimate_height(s.get("Content", ""), f_body, 960) + len(s.get("KeyPoints", [])) * 34 + 60
-    est_h += 100 + len(top_risks) * 160
-    est_h += 100 + len(neg_points) * 36
-    est_h += 100 + len(checkin_list) * 34
-    est_h += 100 + len(checkout_list) * 34
-    est_h += 300  # footer
+        body_txt = sanitize(s.get("Content", ""))
+        # truncate to ~150 words
+        words = body_txt.split()
+        if len(words) > 120: body_txt = " ".join(words[:120]) + "..."
+        kps = s.get("KeyPoints", [])[:3]
+        est += 56                                              # heading row
+        est += block_height(body_txt, f_body, CONTENT_W - 40, LH_BODY) + 10
+        est += len(kps) * LH_SMALL + 10
+        est += 20                                             # divider gap
+    # top risks
+    if top_risks:
+        est += 70
+        for r in top_risks:
+            est += LH_H2 + block_height(sanitize(r.get("Detail","")), f_body, CONTENT_W-60, LH_BODY, 3) + 30
+    # neg + checklists
+    est += 70 + len(neg_pts) * LH_BODY
+    est += 70 + max(len(ci_list), len(co_list)) * LH_BODY
+    est += 200          # footer
 
-    W = 1200
-    canvas = Image.new("RGB", (W, int(est_h) + 400), C_BG)
+    canvas = Image.new("RGB", (W, est + 300), C_BG)
     draw   = ImageDraw.Draw(canvas)
     y = 0
 
-    # ══════════════════════════════════
-    # 1. 顶部 Banner
-    # ══════════════════════════════════
-    draw.rectangle([(0, 0), (W, 180)], fill=C_DARK)
-    title_txt = "合同深度分析报告" if is_cn else "Contract Deep-Dive Report"
-    draw.text((60, 30), sanitize(title_txt), font=f_title, fill=C_GOLD)
-    subtitle = "Hao Harbour Intelligence · AI-Powered AST Analysis"
-    draw.text((60, 95), subtitle, font=f_small, fill=(180, 180, 190))
-    # 右侧整体风险评级 badge
-    risk_col = RISK_COLOR.get(overall_risk, C_MED)
-    risk_lbl = (RISK_LABEL_CN if is_cn else RISK_LABEL_EN).get(overall_risk, overall_risk)
-    draw.rounded_rectangle([(W - 230, 40), (W - 60, 130)], radius=14, fill=risk_col)
-    draw.text((W - 220, 50), "整体风险" if is_cn else "Overall Risk", font=f_small, fill=(255, 255, 255))
-    draw.text((W - 210, 78), risk_lbl, font=f_h2, fill=(255, 255, 255))
-    y = 200
+    # ════════════ 1. BANNER ════════════
+    draw.rectangle([(0, 0), (W, 190)], fill=C_DARK)
+    banner_txt = "合同深度分析报告" if is_cn else "AST Contract Analysis"
+    draw.text((MARGIN, 28), banner_txt, font=f_title, fill=C_GOLD)
+    draw.text((MARGIN, 88), "Hao Harbour Intelligence · AI-Powered Analysis", font=f_small, fill=(170,170,185))
 
-    # ══════════════════════════════════
-    # 2. 核心元数据卡片（3列网格）
-    # ══════════════════════════════════
-    draw.rectangle([(40, y), (W - 40, y + 48)], fill=C_GOLD)
-    section_title = "📌 核心条款速览" if is_cn else "📌 Key Contract Terms"
-    draw.text((60, y + 8), sanitize(section_title), font=f_h2, fill=(255, 255, 255))
-    y += 60
+    # Risk badge top-right
+    rc = RISK_COL.get(overall, C_MED)
+    rl = (RISK_CN if is_cn else RISK_EN).get(overall, overall)
+    draw.rounded_rectangle([(W-220, 38), (W-MARGIN, 150)], radius=12, fill=rc)
+    badge_label = "整体风险" if is_cn else "Overall Risk"
+    draw.text((W-205, 52), badge_label, font=f_small, fill=(255,255,255))
+    draw.text((W-205, 82), rl, font=f_h2, fill=(255,255,255))
+    y = 210
+
+    # ════════════ 2. ONE-LINER ════════════
+    if one_liner:
+        draw.rounded_rectangle([(MARGIN, y), (W-MARGIN, y+52)], radius=8, fill=(240,248,240))
+        draw.text((MARGIN+16, y+14), ("💡 " + one_liner)[:90], font=f_body, fill=(30,100,50))
+        y += 68
+
+    # ════════════ 3. META GRID (3 cols) ════════════
+    sec_label = "📌 核心条款" if is_cn else "📌 Key Terms"
+    draw.rectangle([(MARGIN, y), (W-MARGIN, y+46)], fill=C_GOLD)
+    draw.text((MARGIN+14, y+10), sec_label, font=f_h2, fill=(255,255,255))
+    y += 56
 
     META_FIELDS = [
-        ("房东" if is_cn else "Landlord",          meta.get("Landlord", "—")),
-        ("租客" if is_cn else "Tenant",             meta.get("Tenant", "—")),
-        ("房屋地址" if is_cn else "Property",       meta.get("Address", "—")),
-        ("月租" if is_cn else "Rent PCM",           meta.get("RentPCM", "—")),
-        ("押金" if is_cn else "Deposit",            meta.get("Deposit", "—")),
-        ("起租日期" if is_cn else "Start Date",     meta.get("StartDate", "—")),
-        ("终止日期" if is_cn else "End Date",       meta.get("EndDate", "—")),
-        ("租期" if is_cn else "Term",               meta.get("Term", "—")),
-        ("租金支付日" if is_cn else "Pay Day",      meta.get("RentPayDay", "—")),
-        ("支付方式" if is_cn else "Pay Method",     meta.get("RentPayMethod", "—")),
-        ("押金保护" if is_cn else "Deposit Scheme", meta.get("DepositScheme", "—")),
-        ("解约条款" if is_cn else "Break Clause",   meta.get("BreakClause", "—")),
-        ("提前通知" if is_cn else "Notice Period",  meta.get("NoticePeriod", "—")),
-        ("是否需担保人" if is_cn else "Guarantor",  meta.get("Guarantor", "—")),
-        ("养宠物" if is_cn else "Pets",             meta.get("PetsAllowed", "—")),
+        ("房东" if is_cn else "Landlord",         meta.get("Landlord","—")),
+        ("租客" if is_cn else "Tenant",            meta.get("Tenant","—")),
+        ("地址" if is_cn else "Address",           meta.get("Address","—")),
+        ("月租" if is_cn else "Rent PCM",          meta.get("RentPCM","—")),
+        ("押金" if is_cn else "Deposit",           meta.get("Deposit","—")),
+        ("押金保护" if is_cn else "Deposit Scheme",meta.get("DepositScheme","—")),
+        ("起租" if is_cn else "Start",             meta.get("StartDate","—")),
+        ("到期" if is_cn else "End",               meta.get("EndDate","—")),
+        ("租期" if is_cn else "Term",              meta.get("Term","—")),
+        ("付租日" if is_cn else "Pay Day",         meta.get("RentPayDay","—")),
+        ("解约条款" if is_cn else "Break Clause",  meta.get("BreakClause","—")),
+        ("提前通知" if is_cn else "Notice",        meta.get("NoticePeriod","—")),
+        ("担保人" if is_cn else "Guarantor",       meta.get("Guarantor","—")),
+        ("宠物" if is_cn else "Pets",              meta.get("PetsAllowed","—")),
+        ("吸烟" if is_cn else "Smoking",           meta.get("SmokingAllowed","—")),
     ]
 
-    col_w = (W - 80) // 3
-    col_x = [60, 60 + col_w + 10, 60 + (col_w + 10) * 2]
-    row_h = 80
+    COL_W = (CONTENT_W - 20) // 3
+    COL_X = [MARGIN, MARGIN + COL_W + 10, MARGIN + (COL_W + 10) * 2]
+    ROW_H = 90
+
     for idx, (label, value) in enumerate(META_FIELDS):
-        cx = col_x[idx % 3]
-        cy = y + (idx // 3) * row_h
-        draw.rounded_rectangle([(cx, cy), (cx + col_w - 10, cy + 70)], radius=8, fill=C_GRAY_LT, outline=C_GRAY_MID)
-        draw.text((cx + 12, cy + 8),  sanitize(label), font=f_small, fill=C_SUB)
-        wrap_text(draw, sanitize(str(value))[:80], cx + 12, cy + 30, f_body, col_w - 30, fill=C_TEXT)
+        cx = COL_X[idx % 3]
+        cy = y + (idx // 3) * ROW_H
+        draw.rounded_rectangle([(cx, cy), (cx+COL_W-4, cy+82)], radius=7, fill=C_GRAY_LT, outline=C_GRAY_MD)
+        draw.text((cx+10, cy+8), sanitize(label), font=f_tag, fill=C_SUB)
+        # value — cap at 1 line to avoid overflow
+        val_str = sanitize(str(value))[:60]
+        draw.text((cx+10, cy+34), val_str, font=f_body, fill=C_TEXT)
 
-    y += ((len(META_FIELDS) + 2) // 3) * row_h + 40
+    y += ((len(META_FIELDS) + 2) // 3) * ROW_H + 30
 
-    # ══════════════════════════════════
-    # 3. 总体风险说明
-    # ══════════════════════════════════
-    risk_bg = {k: (v[0], v[1], v[2], 25) for k, v in RISK_COLOR.items()}
-    draw.rounded_rectangle([(40, y), (W - 40, y + 100)], radius=12, fill=C_GRAY_LT, outline=RISK_COLOR.get(overall_risk, C_MED))
-    risk_reason = risk_data.get("OverallRiskReason", "")
-    lbl = "整体风险评估：" if is_cn else "Overall Risk Assessment: "
-    draw.text((60, y + 10), lbl + risk_lbl, font=f_h2, fill=RISK_COLOR.get(overall_risk, C_MED))
-    wrap_text(draw, sanitize(risk_reason), 60, y + 48, f_body, W - 120, fill=C_TEXT)
-    y += 120
+    # ════════════ 4. RISK SUMMARY BAR ════════════
+    reason = sanitize(risk_data.get("OverallRiskReason", ""))
+    if reason:
+        draw.rounded_rectangle([(MARGIN, y), (W-MARGIN, y+16+block_height(reason,f_body,CONTENT_W-30,LH_BODY)+16)],
+                                radius=8, fill=C_GRAY_LT, outline=rc)
+        risk_bar_label = ("整体风险：" if is_cn else "Risk: ") + rl
+        draw.text((MARGIN+14, y+10), risk_bar_label, font=f_h2, fill=rc)
+        new_y = put_text(draw, reason, MARGIN+14, y+50, f_body, CONTENT_W-30, C_TEXT, LH_BODY)
+        y = new_y + 24
 
-    # ══════════════════════════════════
-    # 4. 章节深度解读
-    # ══════════════════════════════════
-    y = draw_section_header(draw, y + 20, "📖 逐章节深度解读" if is_cn else "📖 Clause-by-Clause Analysis")
+    # ════════════ 5. CLAUSE SECTIONS ════════════
+    sec_label2 = "📖 逐章节解读" if is_cn else "📖 Clause Analysis"
+    draw.rectangle([(MARGIN, y), (W-MARGIN, y+46)], fill=C_BLUE)
+    draw.text((MARGIN+14, y+10), sec_label2, font=f_h2, fill=(255,255,255))
+    y += 60
 
     for sec in sections:
         heading  = sanitize(sec.get("Heading", ""))
-        content  = sanitize(sec.get("Content", ""))
-        kps      = sec.get("KeyPoints", [])
+        raw_body = sanitize(sec.get("Content", ""))
+        kps      = [sanitize(k) for k in sec.get("KeyPoints", [])[:3]]
         sec_risk = sec.get("RiskLevel", "LOW")
-        if not content: continue
+        if not raw_body: continue
 
-        # 章节标题行 + 风险标签
-        draw.text((60, y), f"▶  {heading}", font=f_h2, fill=C_SECTION)
-        rl_lbl = (RISK_LABEL_CN if is_cn else RISK_LABEL_EN).get(sec_risk, sec_risk)
-        draw_pill(draw, 80 + min(int(_dummy_draw.textlength(f"▶  {heading}", font=f_h2)), 700) + 20,
-                  y + 4, rl_lbl, RISK_COLOR.get(sec_risk, C_LOW), f_tag)
-        y += 44
+        # Truncate body to ~120 words
+        words = raw_body.split()
+        if len(words) > 120:
+            raw_body = " ".join(words[:120]) + "..."
 
-        # 正文
-        y = wrap_text(draw, content, 80, y, f_body, W - 160, fill=C_TEXT)
-        y += 10
+        # ── heading row ──
+        sc = RISK_COL.get(sec_risk, C_LOW)
+        draw.rectangle([(MARGIN, y), (MARGIN+6, y+40)], fill=sc)
+        draw.text((MARGIN+16, y+6), heading, font=f_h2, fill=C_BLUE)
+        # risk pill
+        pill_txt = (RISK_CN if is_cn else RISK_EN).get(sec_risk, sec_risk)
+        pill_w = text_width(pill_txt, f_tag) + 20
+        draw.rounded_rectangle([(W-MARGIN-pill_w-4, y+6), (W-MARGIN, y+34)], radius=8, fill=sc)
+        draw.text((W-MARGIN-pill_w+6, y+9), pill_txt, font=f_tag, fill=(255,255,255))
+        y += 50
 
-        # 要点列表
+        # ── body text ──
+        y = put_text(draw, raw_body, MARGIN+20, y, f_body, CONTENT_W-30, C_TEXT, LH_BODY)
+        y += 8
+
+        # ── key points (max 3) ──
         if kps:
-            kp_title = "关键要点：" if is_cn else "Key Points:"
-            draw.text((80, y), kp_title, font=f_small, fill=C_SUB)
-            y += 28
-            for kp in kps[:6]:
-                draw.text((100, y), "•", font=f_body, fill=C_GOLD)
-                y = wrap_text(draw, sanitize(str(kp)), 120, y, f_small, W - 180, fill=C_SUB)
-            y += 8
+            for kp in kps:
+                draw.text((MARGIN+20, y), "▸", font=f_body, fill=C_GOLD)
+                y = put_text(draw, kp[:100], MARGIN+42, y, f_small, CONTENT_W-60, C_SUB, LH_SMALL)
+            y += 4
 
-        # 分隔线
-        draw.line([(80, y + 10), (W - 80, y + 10)], fill=C_GRAY_MID, width=1)
-        y += 30
+        # divider
+        draw.line([(MARGIN+10, y+8), (W-MARGIN-10, y+8)], fill=C_GRAY_MD, width=1)
+        y += 22
 
-    # ══════════════════════════════════
-    # 5. TOP 风险条款
-    # ══════════════════════════════════
+    # ════════════ 6. TOP RISKS ════════════
     if top_risks:
-        y = draw_section_header(draw, y + 20, "⚠️ 前5大风险条款" if is_cn else "⚠️ Top Risk Clauses", accent_color=C_HIGH)
-        for idx, risk in enumerate(top_risks[:5]):
-            title  = sanitize(risk.get("Title", f"风险 {idx+1}"))
+        draw.rectangle([(MARGIN, y), (W-MARGIN, y+46)], fill=C_HIGH)
+        rl2 = "⚠️ 前5大风险条款" if is_cn else "⚠️ Top Risk Clauses"
+        draw.text((MARGIN+14, y+10), rl2, font=f_h2, fill=(255,255,255))
+        y += 60
+
+        for idx, risk in enumerate(top_risks):
+            title  = sanitize(risk.get("Title", ""))
             detail = sanitize(risk.get("Detail", ""))
-            impact = sanitize(risk.get("Impact", ""))
-            # 编号圆圈
-            draw.ellipse([(60, y + 2), (90, y + 32)], fill=C_HIGH)
-            draw.text((68, y + 4), str(idx + 1), font=f_small, fill=(255, 255, 255))
-            draw.text((100, y + 4), title, font=f_h2, fill=C_HIGH)
-            y += 44
-            if detail:
-                y = wrap_text(draw, detail, 100, y, f_body, W - 160, fill=C_TEXT)
-            if impact:
-                imp_lbl = "对租客影响：" if is_cn else "Impact: "
-                draw.text((100, y), imp_lbl, font=f_small, fill=C_MED)
-                y += 26
-                y = wrap_text(draw, impact, 100, y, f_small, W - 160, fill=C_MED)
-            y += 20
+            # cap detail to 2 lines
+            detail_lines = wrap_lines(detail, f_body, CONTENT_W-60)[:2]
+            detail_short = " ".join(detail_lines)
 
-    # ══════════════════════════════════
-    # 6. 签约前谈判建议
-    # ══════════════════════════════════
-    if neg_points:
-        y = draw_section_header(draw, y + 20, "💬 签约前谈判要点" if is_cn else "💬 Negotiation Points", accent_color=C_SECTION)
-        for np_item in neg_points[:8]:
-            draw.text((80, y), "◆", font=f_body, fill=C_GOLD)
-            y = wrap_text(draw, sanitize(str(np_item)), 108, y, f_body, W - 168, fill=C_TEXT)
-            y += 6
+            draw.ellipse([(MARGIN, y+2), (MARGIN+28, y+30)], fill=C_HIGH)
+            draw.text((MARGIN+7, y+4), str(idx+1), font=f_small, fill=(255,255,255))
+            draw.text((MARGIN+38, y+4), title[:70], font=f_h2, fill=C_HIGH)
+            y += LH_H2 + 4
+            if detail_short:
+                y = put_text(draw, detail_short, MARGIN+38, y, f_body, CONTENT_W-60, C_TEXT, LH_BODY, 2)
+            y += 14
 
-    # ══════════════════════════════════
-    # 7. 入住前 & 离租前 清单
-    # ══════════════════════════════════
-    if checkin_list or checkout_list:
-        y = draw_section_header(draw, y + 20, "✅ 行动清单" if is_cn else "✅ Action Checklists", accent_color=C_LOW)
-        cl1, cl2 = (W - 120) // 2, (W - 120) // 2
-        x_left, x_right = 60, 60 + cl1 + 20
+    # ════════════ 7. NEGOTIATION POINTS ════════════
+    if neg_pts:
+        draw.rectangle([(MARGIN, y), (W-MARGIN, y+46)], fill=C_BLUE)
+        nl = "💬 签约前谈判要点" if is_cn else "💬 Negotiation Points"
+        draw.text((MARGIN+14, y+10), nl, font=f_h2, fill=(255,255,255))
+        y += 58
+        for np_item in neg_pts:
+            draw.text((MARGIN+10, y), "◆", font=f_body, fill=C_GOLD)
+            y = put_text(draw, sanitize(str(np_item))[:120], MARGIN+34, y, f_body, CONTENT_W-44, C_TEXT, LH_BODY, 2)
+            y += 4
 
-        ci_title = "入住前必做" if is_cn else "Before Moving In"
-        co_title = "离租前必做" if is_cn else "Before Moving Out"
-        draw.text((x_left,  y), ci_title, font=f_h2, fill=C_LOW)
-        draw.text((x_right, y), co_title, font=f_h2, fill=C_MED)
-        y += 44
+    # ════════════ 8. CHECKLISTS (2 columns) ════════════
+    if ci_list or co_list:
+        draw.rectangle([(MARGIN, y+10), (W-MARGIN, y+56)], fill=C_LOW)
+        cl_title = "✅ 行动清单" if is_cn else "✅ Action Checklists"
+        draw.text((MARGIN+14, y+24), cl_title, font=f_h2, fill=(255,255,255))
+        y += 70
 
-        max_items = max(len(checkin_list), len(checkout_list))
-        for i in range(min(max_items, 8)):
+        half_w = (CONTENT_W - 20) // 2
+        xl, xr = MARGIN, MARGIN + half_w + 20
+
+        ci_hdr = "入住前" if is_cn else "Move-In"
+        co_hdr = "离租前" if is_cn else "Move-Out"
+        draw.text((xl, y), ci_hdr, font=f_h2, fill=C_LOW)
+        draw.text((xr, y), co_hdr, font=f_h2, fill=C_MED)
+        y += LH_H2 + 4
+
+        for i in range(max(len(ci_list), len(co_list))):
             row_y = y
-            if i < len(checkin_list):
-                draw.text((x_left, row_y), f"☐ ", font=f_body, fill=C_LOW)
-                wrap_text(draw, sanitize(checkin_list[i]), x_left + 28, row_y, f_body, cl1 - 30, fill=C_TEXT)
-            if i < len(checkout_list):
-                draw.text((x_right, row_y), f"☐ ", font=f_body, fill=C_MED)
-                wrap_text(draw, sanitize(checkout_list[i]), x_right + 28, row_y, f_body, cl2 - 30, fill=C_TEXT)
-            y += 36
+            if i < len(ci_list):
+                draw.text((xl, row_y), "☐", font=f_body, fill=C_LOW)
+                put_text(draw, sanitize(ci_list[i])[:80], xl+28, row_y, f_body, half_w-32, C_TEXT, LH_BODY, 1)
+            if i < len(co_list):
+                draw.text((xr, row_y), "☐", font=f_body, fill=C_MED)
+                put_text(draw, sanitize(co_list[i])[:80], xr+28, row_y, f_body, half_w-32, C_TEXT, LH_BODY, 1)
+            y += LH_BODY + 4
 
-    # ══════════════════════════════════
-    # 8. 水印
-    # ══════════════════════════════════
-    wm_layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-    wm_draw  = ImageDraw.Draw(wm_layer)
-    for wy in range(0, canvas.size[1], 900):
-        wm_draw.text((160, wy + 350), "Hao Harbour", font=f_wm, fill=(200, 200, 200, 55))
-    rotated = wm_layer.rotate(30, expand=False)
-    canvas.paste(rotated, (0, 0), rotated)
+    # ════════════ 9. WATERMARK ════════════
+    wm = Image.new("RGBA", canvas.size, (0,0,0,0))
+    wd = ImageDraw.Draw(wm)
+    for wy in range(0, canvas.size[1], 850):
+        wd.text((140, wy+320), "Hao Harbour", font=f_wm, fill=(200,200,200,50))
+    canvas.paste(wm.rotate(30, expand=False), (0,0), wm.rotate(30, expand=False))
 
-    # ══════════════════════════════════
-    # 9. 页脚免责声明
-    # ══════════════════════════════════
-    y += 60
-    draw.rectangle([(0, y), (W, y + 200)], fill=(240, 240, 245))
+    # ════════════ 10. FOOTER ════════════
+    y += 40
+    draw.rectangle([(0, y), (W, y+180)], fill=(238,238,244))
     disclaimer = (
-        "本报告由 AI 辅助生成，仅供参考，不构成任何形式的法律建议。请在签约前务必咨询专业英国执业律师。"
-        "Hao Harbour 对报告内容的准确性、完整性不承担法律责任。"
+        "本报告由 AI 辅助生成，仅供参考，不构成法律建议。请在签约前咨询专业英国执业律师。Hao Harbour 不承担法律责任。"
         if is_cn else
-        "This report is AI-assisted and for reference only. It does not constitute legal advice. "
-        "Please consult a qualified UK solicitor before signing. Hao Harbour accepts no legal liability."
+        "AI-assisted report for reference only. Not legal advice. Consult a UK solicitor before signing. Hao Harbour accepts no liability."
     )
-    wrap_text(draw, disclaimer, 60, y + 20, f_small, W - 120, fill=(130, 130, 140))
-    draw.text((60, y + 140), f"Generated by Hao Harbour Intelligence · {__import__('datetime').datetime.now().strftime('%Y-%m-%d')}",
-              font=f_tag, fill=(170, 170, 180))
+    put_text(draw, disclaimer, MARGIN, y+20, f_small, CONTENT_W, (130,130,142), LH_SMALL)
+    draw.text((MARGIN, y+140), f"Hao Harbour Intelligence · {__import__('datetime').datetime.now().strftime('%Y-%m-%d')}",
+              font=f_tag, fill=(170,170,182))
 
-    final_h = y + 200
+    final_h = y + 180
     return canvas.crop((0, 0, W, int(final_h)))
 
 
@@ -1277,9 +1278,9 @@ if 'viewing_items' not in st.session_state:
 
 ws = get_ws()
 if ws:
-    t1, t2, t3, t4, t5, t6, t7 = st.tabs([
+    t1, t2, t3, t5, t7 = st.tabs([
         "✨ 发布新房源", "⚙️ 管理与统计", "🚀 批量发送引擎",
-        "🌐 多平台内容包", "👁️ 带看小结", "📊 对比与简报", "🧰 工具箱"
+        "👁️ 带看小结", "🧰 工具箱"
     ])
     
     with t1:
@@ -1515,110 +1516,6 @@ if ws:
 
     # =====================================================================
     # TAB 4 — 🌐 多平台内容包
-    # =====================================================================
-    with t4:
-        st.subheader("🌐 多平台内容包生成器")
-        st.info("💡 同一套房源，一键生成三个平台专属版本：小红书竖版 / 微信方版 / 抖音竖版，同时生成抖音口播脚本。")
-
-        mp_url = st.text_input("🔗 Rightmove 链接（可选，自动填入）", key="mp_url")
-        if st.button("🔍 读取房源", key="mp_fetch"):
-            if mp_url:
-                with st.spinner("抓取中..."):
-                    mp_data, mp_err = scrape_rightmove(mp_url)
-                    if mp_err:
-                        st.error(mp_err)
-                    else:
-                        st.session_state['mp_data'] = mp_data
-                        st.success("✅ 读取成功！")
-
-        mpd = st.session_state.get('mp_data', {})
-        mc1, mc2, mc3, mc4 = st.columns(4)
-        mp_name  = mc1.text_input("房源名称", value=mpd.get('title', ''), key="mp_name")
-        mp_price = mc2.number_input("月租 (£)", min_value=0, value=mpd.get('price', 0), key="mp_price")
-        mp_reg_opts = ["中伦敦", "东伦敦", "西伦敦", "北伦敦", "南伦敦"]
-        mp_auto_reg = mpd.get('region', '中伦敦')
-        mp_reg = mc3.selectbox("区域", mp_reg_opts,
-                               index=mp_reg_opts.index(mp_auto_reg) if mp_auto_reg in mp_reg_opts else 0,
-                               key="mp_reg")
-        mp_rm_opts = ["Studio", "1房", "2房", "3房", "4房+"]
-        mp_default_room = mpd.get('rooms', '')
-        mp_rooms = mc4.selectbox("户型", mp_rm_opts,
-                                 index=mp_rm_opts.index(mp_default_room) if mp_default_room in mp_rm_opts else 0,
-                                 key="mp_rooms")
-        mp_desc = st.text_area("房源描述（用于生成口播文案）", value=mpd.get('description', ''), height=80, key="mp_desc")
-        mp_imgs = st.file_uploader("上传图片（建议 6-8 张）", accept_multiple_files=True, key="mp_files")
-
-        # 如果没有上传，从 Rightmove 抓取的图片自动使用
-        mp_files_to_use = list(mp_imgs) if mp_imgs else []
-        if not mp_files_to_use and mpd.get('images'):
-            for img_url_item in mpd.get('images', []):
-                try:
-                    r_i = requests.get(str(img_url_item), timeout=10)
-                    if r_i.status_code == 200:
-                        mp_files_to_use.append(BytesIO(r_i.content))
-                except: pass
-
-        if st.button("🎨 生成三版海报 + 口播脚本", type="primary", key="mp_gen"):
-            if not mp_files_to_use:
-                st.warning("请先上传图片或读取 Rightmove 链接")
-            elif not mp_name:
-                st.warning("请填写房源名称")
-            else:
-                with st.spinner("正在生成三个版本，稍等片刻..."):
-                    p_xhs  = create_poster(mp_files_to_use, mp_name, mp_price, mp_rooms, mp_reg)
-                    p_wc   = create_wechat_poster(mp_files_to_use, mp_name, mp_price, mp_rooms, mp_reg)
-                    p_dy   = create_story_poster(mp_files_to_use, mp_name, mp_price, mp_rooms, mp_reg)
-                    script = gen_douyin_script(mp_name, int(mp_price), mp_rooms, mp_reg, mp_desc)
-
-                if p_xhs and p_wc and p_dy:
-                    st.session_state['mp_posters'] = (p_xhs, p_wc, p_dy)
-                    st.session_state['mp_script'] = script
-                    st.success("✅ 三版海报生成完毕！")
-
-        if 'mp_posters' in st.session_state:
-            p_xhs, p_wc, p_dy = st.session_state['mp_posters']
-            col_xhs, col_wc, col_dy = st.columns(3)
-            with col_xhs:
-                st.markdown("**📱 小红书竖版** (1200×2350)")
-                st.image(p_xhs, use_container_width=True)
-                buf_xhs = BytesIO()
-                p_xhs.save(buf_xhs, format="JPEG", quality=95)
-                st.download_button("⬇️ 下载小红书版", data=buf_xhs.getvalue(),
-                                   file_name=f"xhs_{mp_name[:15]}.jpg", mime="image/jpeg", key="dl_xhs")
-            with col_wc:
-                st.markdown("**💬 微信方版** (1080×1080)")
-                st.image(p_wc, use_container_width=True)
-                buf_wc = BytesIO()
-                p_wc.save(buf_wc, format="JPEG", quality=95)
-                st.download_button("⬇️ 下载微信版", data=buf_wc.getvalue(),
-                                   file_name=f"wechat_{mp_name[:15]}.jpg", mime="image/jpeg", key="dl_wc")
-            with col_dy:
-                st.markdown("**🎬 抖音Story版** (1080×1920)")
-                st.image(p_dy, use_container_width=True)
-                buf_dy = BytesIO()
-                p_dy.save(buf_dy, format="JPEG", quality=95)
-                st.download_button("⬇️ 下载抖音版", data=buf_dy.getvalue(),
-                                   file_name=f"douyin_{mp_name[:15]}.jpg", mime="image/jpeg", key="dl_dy")
-
-            st.markdown("---")
-            st.markdown("**🎙️ 抖音/小红书 15秒口播文案**")
-            st.text_area("复制后配合视频使用", value=st.session_state.get('mp_script', ''), height=160, key="mp_script_box")
-
-            # 一键打包下载（ZIP）
-            import zipfile
-            zip_buf = BytesIO()
-            with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-                for label, buf in [("xhs", buf_xhs), ("wechat", buf_wc), ("douyin", buf_dy)]:
-                    zf.writestr(f"{label}_{mp_name[:15]}.jpg", buf.getvalue())
-                zf.writestr("script.txt", st.session_state.get('mp_script', '').encode('utf-8'))
-            st.download_button("📦 一键下载全部（ZIP）", data=zip_buf.getvalue(),
-                               file_name=f"hao_harbour_{mp_name[:15]}.zip",
-                               mime="application/zip", key="dl_zip")
-
-
-    # =====================================================================
-    # TAB 5 — 👁️ 专业带看报告生成器
-    # =====================================================================
     with t5:
         st.subheader("👁️ 专业带看报告生成器 (Pro Viewing Report)")
         st.info("填写深度测评信息，生成带星级评分的结构化报告及专业 PDF。")
@@ -1756,48 +1653,6 @@ if ws:
                 mime="application/pdf"
             )
 
-    # =====================================================================
-    # TAB 6 — 📊 房源对比 + 市场简报
-    # =====================================================================
-    with t6:
-        st.subheader("📊 房源对比 & 市场简报")
-        
-        st.markdown("#### 1️⃣ 房源横向对比")
-        try:
-            all_props = get_all_records_safe(ws)
-        except Exception as e:
-            st.error(f"⚠️ Google Sheets 读取失败，请检查服务账号权限或网络连接。\n\n错误详情：{e}")
-            all_props = []
-        if all_props:
-            titles = [f"{r['title']} (£{r['price']})" for r in all_props]
-            selected_names = st.multiselect("选择需要对比的房源 (最多4个)", options=titles, max_selections=4)
-            
-            if st.button("🖼️ 生成对比长图", key="comp_gen"):
-                if selected_names:
-                    selected_data = [r for r in all_props if f"{r['title']} (£{r['price']})" in selected_names]
-                    comp_img = gen_comparison_image(selected_data)
-                    st.image(comp_img, use_container_width=True)
-                    
-                    buf_comp = BytesIO()
-                    comp_img.save(buf_comp, format="JPEG")
-                    st.download_button("⬇️ 下载对比图", data=buf_comp.getvalue(), 
-                                       file_name="comparison.jpg", mime="image/jpeg")
-                else:
-                    st.warning("请至少选择一个房源")
-
-        st.markdown("---")
-        st.markdown("#### 2️⃣ 伦敦租赁市场走势 (Google Trends)")
-        kw = st.text_input("输入关键词研究热度", value="London Property")
-        if st.button("📈 获取趋势数据"):
-            with st.spinner("从 Google 获取数据中..."):
-                trend_df = get_market_trends(kw)
-                if trend_df is not None and not trend_df.empty:
-                    st.line_chart(trend_df[kw])
-                    st.caption(f"过去三个月 '{kw}' 在大伦敦地区的搜索热度趋势")
-                else:
-                    st.info("💡 环境未配置 Pytrends 驱动或访问受限。请确保服务器具备代理或海外环境。")
-
-    # =====================================================================
     # =====================================================================
     # TAB 7 — 🧰 工具箱（合同深度分析 v4.0 + 爆款关键词）
     # =====================================================================
@@ -1945,25 +1800,5 @@ if ws:
                             )
                         except Exception as e:
                             st.error(f"PDF 生成失败：{e}")
-
-        with tc2:
-            st.markdown("#### 📱 小红书爆款优化器")
-            st.info("根据当前趋势，给出最适合伦敦房产的标题模板与哈希标签。")
-            topic = st.selectbox("核心话题", ["新盘推介", "租房避坑", "区域测评", "搬家攻略"])
-            
-            # 模拟爆款库
-            templates = {
-                "新盘推介": ["被问爆了！伦敦{region}这个宝藏新盘终于开盘了😭", "伦敦租房｜这可能是{region}性价比的天花板了✨", "[寻房记] 住进这里，每天都被伦敦的阳光叫醒"],
-                "租房避坑": ["救命！伦敦租房这5个坑千万别踩❌", "伦敦租房避雷指南：学长学姐带血的教训", "新手必看！伦敦租房合同里藏着的“猫腻”"],
-                "区域测评": ["住在{region}是种什么体验？", "伦敦区域测评｜{region}真的值得住吗？", "大数据请把这个视频推给想住{region}的朋友！"]
-            }
-            
-            p_reg_name = st.text_input("填入关键词(如区域名)", value="Canary Wharf")
-            if st.button("✨ 随机生成爆款文案建议"):
-                st.markdown("**🔥 推荐标题:**")
-                for t in templates.get(topic, []):
-                    st.code(t.replace("{region}", p_reg_name))
-                st.markdown("**🏷️ 推荐标签:**")
-                st.write("#伦敦租房 #英国留学 #伦敦生活 #伦敦生活方式 #伦敦找房 #HaoHarbour")
 
 # --- End of Admin Tool ---
