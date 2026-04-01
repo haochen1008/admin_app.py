@@ -752,16 +752,25 @@ def extract_contract_pro(pdf_file, target_lang="中文") -> Dict[str, Any]:
         lang_note = "请用中文回答所有内容。" if target_lang == "中文" else "Please respond entirely in English."
 
         def call_ai(system_prompt: str, user_content: str, timeout: int = 120) -> str:
-            r = requests.post(
-                "https://api.deepseek.com/chat/completions",
-                json={"model": "deepseek-chat", "max_tokens": 4096, "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user",   "content": user_content}
-                ]},
-                headers={"Authorization": f"Bearer {api_key}"},
-                timeout=timeout
-            )
-            return r.json()["choices"][0]["message"]["content"]
+            try:
+                r = requests.post(
+                    "https://api.deepseek.com/chat/completions",
+                    json={"model": "deepseek-chat", "max_tokens": 4096, "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user",   "content": user_content}
+                    ]},
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    timeout=timeout
+                )
+                r.raise_for_status()
+                result = r.json()["choices"][0]["message"]["content"]
+                return result
+            except requests.exceptions.Timeout:
+                return '{"error": "API timeout"}'
+            except requests.exceptions.RequestException as e:
+                return f'{{"error": "API request failed: {str(e)[:100]}"}}'
+            except (KeyError, IndexError) as e:
+                return f'{{"error": "API response malformed: {str(e)[:100]}"}}'
 
         # ── 截取前 8000 字符 + 后 4000 字符覆盖合同首尾（元数据/特殊条款通常在头尾）──
         text_head = full_text[:8000]
@@ -886,7 +895,10 @@ def extract_contract_pro(pdf_file, target_lang="中文") -> Dict[str, Any]:
 
         for chunk_name, chunk_text in texts_to_analyze:
             chunk_raw = call_ai(pass2_system, f"[{chunk_name}]\n\n{chunk_text}")
+            # Debug: show raw response in UI
+            st.caption(f"🔍 [{chunk_name}] API返回 {len(chunk_raw)} 字符，前100字: {chunk_raw[:100]}")
             chunk_result = parse_ai_json(chunk_raw)
+            st.caption(f"   解析结果类型: {type(chunk_result).__name__}，项目数: {len(chunk_result) if isinstance(chunk_result, (list,dict)) else 'N/A'}")
             # parse_ai_json may return list or dict
             if isinstance(chunk_result, list):
                 all_sections.extend(chunk_result)
