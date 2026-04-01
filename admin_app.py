@@ -906,18 +906,36 @@ def extract_contract_pro(pdf_file, target_lang="中文") -> Dict[str, Any]:
                 all_sections.append(chunk_result)
 
         # 合并相同 Heading 的 sections
+        # 兼容 AI 可能返回的各种字段名变体
+        def extract_pts(sec):
+            """从 sec 中提取要点列表，兼容多种字段名"""
+            # Try all possible field name variants
+            for key in ["Points", "points", "KeyPoints", "keyPoints", "key_points"]:
+                v = sec.get(key, [])
+                if v and isinstance(v, list): return v
+            # Try Content variants -> convert to points
+            for key in ["Content", "content", "Summary", "summary"]:
+                v = sec.get(key, "")
+                if v and isinstance(v, str) and len(v) > 10:
+                    # Split by sentence endings or newlines
+                    parts = re.split(r'[。\n；;]', v)
+                    pts = ["• " + p.strip() for p in parts if p.strip() and len(p.strip()) > 5][:5]
+                    if pts: return pts
+            return []
+
         merged: Dict[str, Dict] = {}
         for sec in all_sections:
-            h = sec.get("Heading", "其他")
-            pts = sec.get("Points", [])
-            # backward compat: if old format has Content, convert to Points
-            if not pts and sec.get("Content"):
-                pts = ["• " + s.strip() for s in sec["Content"].split("。") if s.strip()][:5]
+            # Normalise heading key
+            h = sec.get("Heading") or sec.get("heading") or sec.get("Category") or "其他"
+            pts = extract_pts(sec)
+            # Normalise risk level
+            rl = sec.get("RiskLevel") or sec.get("riskLevel") or sec.get("risk_level") or "LOW"
+            rl = str(rl).upper()
+            if rl not in ("HIGH","MEDIUM","LOW"): rl = "LOW"
+
             if h not in merged:
-                merged[h] = {"Heading": h, "Points": pts,
-                             "RiskLevel": sec.get("RiskLevel", "LOW")}
+                merged[h] = {"Heading": h, "Points": pts, "RiskLevel": rl}
             else:
-                # merge points, deduplicate, cap at 5
                 all_pts = merged[h].get("Points", []) + pts
                 seen, uniq = set(), []
                 for p in all_pts:
@@ -925,10 +943,9 @@ def extract_contract_pro(pdf_file, target_lang="中文") -> Dict[str, Any]:
                     if key not in seen:
                         seen.add(key); uniq.append(p)
                 merged[h]["Points"] = uniq[:5]
-                # Escalate risk level
                 rl_order = {"HIGH": 2, "MEDIUM": 1, "LOW": 0}
-                if rl_order.get(sec.get("RiskLevel","LOW"),0) > rl_order.get(merged[h]["RiskLevel"],0):
-                    merged[h]["RiskLevel"] = sec.get("RiskLevel","LOW")
+                if rl_order.get(rl,0) > rl_order.get(merged[h]["RiskLevel"],0):
+                    merged[h]["RiskLevel"] = rl
 
         final_sections = list(merged.values())
 
@@ -1034,11 +1051,17 @@ def create_contract_analysis_pdf(data: Dict, lang: str = "中文") -> Image.Imag
         except: return len(txt)*getattr(font,"size",12)
 
     def fit(val, font, max_w):
-        """Truncate to max_w px, appending … if cut."""
+        """Truncate to max_w px, appending … if cut. Falls back to char count if font measurement fails."""
         s = san(str(val))
-        if px(s, font) <= max_w: return s
-        while s and px(s+"…", font) > max_w: s=s[:-1]
-        return s+"…"
+        try:
+            if px(s, font) <= max_w: return s
+            while s and px(s+"…", font) > max_w: s=s[:-1]
+            return s+"…"
+        except:
+            # Fallback: estimate ~14px per character for 24px font
+            est_chars = max_w // 14
+            if len(s) <= est_chars: return s
+            return s[:est_chars-1] + "…"
 
     def wrap(text, font, max_w):
         """Split text into lines that fit max_w."""
@@ -1146,15 +1169,17 @@ def create_contract_analysis_pdf(data: Dict, lang: str = "中文") -> Image.Imag
         ("吸烟"    if is_cn else "Smoking",         meta.get("SmokingAllowed","—")),
         ("付租日"  if is_cn else "Pay Day",         meta.get("RentPayDay","—")),
     ]
-    ROW_H = 94
+    ROW_H = 110  # taller to allow 2-line values
     for idx,(lbl,val) in enumerate(META):
         cx = COL_X[idx%3]
         cy = y+(idx//3)*ROW_H
-        # Draw cell — width = CELL_W, guaranteed not to overlap
-        draw.rounded_rectangle([(cx,cy),(cx+CELL_W,cy+86)],
+        draw.rounded_rectangle([(cx,cy),(cx+CELL_W,cy+102)],
                                  radius=7, fill=GLT, outline=GMD)
-        draw.text((cx+10,cy+8),  san(lbl),       font=FG, fill=SUB)
-        draw.text((cx+10,cy+34), fit(val,FB,VAL_W), font=FB, fill=TXT)
+        draw.text((cx+10,cy+8), san(lbl), font=FG, fill=SUB)
+        # Wrap value to max 2 lines — NO truncation, text wraps cleanly
+        val_lines = wrap(san(str(val)), FB, VAL_W)[:2]
+        for li, vl in enumerate(val_lines):
+            draw.text((cx+10, cy+32+li*LH_BD), vl, font=FB, fill=TXT)
 
     y += ((len(META)+2)//3)*ROW_H + 28
 
@@ -1758,22 +1783,28 @@ if ws:
                     for i, sec in enumerate(sections):
                         sec_risk = sec.get('RiskLevel', 'LOW')
                         emoji = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢"}.get(sec_risk, "🟢")
+                        # Get points — support both Points and legacy Content/KeyPoints
+                        pts = sec.get('Points', [])
+                        if not pts:
+                            pts = sec.get('KeyPoints', [])
+                        if not pts and sec.get('Content'):
+                            pts = [p.strip() for p in sec['Content'].split('\n') if p.strip()]
+                        pts_str = "\n".join(pts)
+
                         with st.expander(f"{emoji} {sec.get('Heading', '未命名')} [{sec_risk}]", expanded=(sec_risk == "HIGH")):
                             h_val = st.text_input("章节标题", sec.get('Heading', ''), key=f"sh_{i}")
-                            c_val = st.text_area("深度解读内容", sec.get('Content', ''), height=180, key=f"sc_{i}")
-                            kp_val = st.text_area("关键要点（每行一条）",
-                                                  "\n".join(sec.get('KeyPoints', [])), height=80, key=f"skp_{i}")
+                            pts_val = st.text_area("要点（每行一条，• 开头）", pts_str, height=200, key=f"sc_{i}")
                             rl_val = st.selectbox("风险等级", ["LOW", "MEDIUM", "HIGH"],
                                                   index=["LOW", "MEDIUM", "HIGH"].index(sec_risk) if sec_risk in ["LOW","MEDIUM","HIGH"] else 0,
                                                   key=f"srl_{i}")
                             if not st.button(f"🗑️ 删除", key=f"sdel_{i}"):
                                 new_sections.append({
-                                    "Heading": h_val, "Content": c_val,
-                                    "KeyPoints": [k.strip() for k in kp_val.split("\n") if k.strip()],
+                                    "Heading": h_val,
+                                    "Points": [k.strip() for k in pts_val.split("\n") if k.strip()],
                                     "RiskLevel": rl_val
                                 })
                     if st.button("➕ 添加自定义章节"):
-                        new_sections.append({"Heading": "自定义条款", "Content": "", "KeyPoints": [], "RiskLevel": "LOW"})
+                        new_sections.append({"Heading": "自定义条款", "Points": [], "RiskLevel": "LOW"})
                     v4['Sections'] = new_sections
 
                 # ── 风险 & 建议 ──
