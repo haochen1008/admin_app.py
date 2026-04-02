@@ -529,6 +529,116 @@ def gen_pro_viewing_summary(client_name: str, date: str, address: str, facing: s
     summary.append("━━━━━━━━━━━━━━━━━━━━━━━━")
     return "\n".join(summary)
 
+
+def ai_viewing_summary(section_key: str, items: Dict[str, int], lang: str = "中文") -> str:
+    """用 AI 为某个评估板块生成简洁的文字总结"""
+    try:
+        api_key = st.secrets["OPENAI_API_KEY"]
+        scores_text = "\n".join([f"- {item}: {'★'*score}{'☆'*(5-score)} ({score}/5)" for item, score in items.items()])
+        section_names = {
+            "Interior": "室内深度评估",
+            "Building": "大楼管理评估",
+            "Neighborhood": "周边微环境"
+        }
+        section_cn = section_names.get(section_key, section_key)
+
+        if lang == "中文":
+            prompt = f"""你是一名专业的伦敦房产带看顾问，正在为客户撰写带看报告。
+请根据以下【{section_cn}】板块的星级评分，用2-4句话写一段简洁专业的中文总结。
+要求：
+- 直接指出亮点和不足
+- 提及具体评分低的项目（3分及以下）
+- 语气专业但易懂
+- 不要使用"总体来说"等废话开头
+- 控制在80字以内
+
+评分数据：
+{scores_text}
+
+直接输出总结文字，不要加任何标题或前缀。"""
+        else:
+            prompt = f"""You are a professional London property viewing consultant writing a viewing report.
+Based on the {section_key} section ratings below, write a concise 2-4 sentence professional summary in English.
+Requirements:
+- Highlight strengths and weaknesses directly
+- Mention specific items rated 3 or below
+- Professional but accessible tone
+- Under 80 words
+- No filler phrases like "Overall speaking"
+
+Ratings:
+{scores_text}
+
+Output the summary directly, no headings or prefixes."""
+
+        r = requests.post("https://api.deepseek.com/chat/completions",
+            json={"model": "deepseek-chat", "max_tokens": 200,
+                  "messages": [{"role": "user", "content": prompt}]},
+            headers={"Authorization": f"Bearer {api_key}"}, timeout=30)
+        r.raise_for_status()
+        return r.json()["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        return f"AI 总结生成失败，请手动填写。({e})"
+
+
+def ai_general_summary(client: str, address: str, facing: str,
+                       items: Dict[str, Dict[str, int]], remarks: Dict[str, str],
+                       lang: str = "中文") -> str:
+    """用 AI 生成整体带看总结"""
+    try:
+        api_key = st.secrets["OPENAI_API_KEY"]
+        all_scores = []
+        for sec, sec_items in items.items():
+            for item, score in sec_items.items():
+                all_scores.append(f"{item}: {score}/5")
+        avg = sum(v for s in items.values() for v in s.values()) / max(1, sum(len(s) for s in items.values()))
+
+        notes_text = "\n".join([f"[{k}] {v}" for k, v in remarks.items() if v])
+
+        if lang == "中文":
+            prompt = f"""你是伦敦房产带看专家，请为以下房源写一段专业的总体评价（3-5句话，控制在150字以内）。
+
+房源：{address}
+朝向：{facing if facing else "未知"}
+综合评分：{avg:.1f}/5
+各项评分摘要：{'; '.join(all_scores[:10])}
+备注：{notes_text if notes_text else "无"}
+
+要求：
+- 先给出一句总体定性（值得考虑/谨慎考虑/不推荐）
+- 点出最大亮点（1-2点）
+- 点出最需关注的问题（1-2点）
+- 结尾给出建议（是否值得跟进）
+- 不要重复已知信息，直接给出判断
+
+直接输出评价文字，不加标题。"""
+        else:
+            prompt = f"""You are a London property viewing expert. Write a professional overall summary (3-5 sentences, under 150 words).
+
+Property: {address}
+Aspect: {facing if facing else "unknown"}
+Average score: {avg:.1f}/5
+Score highlights: {'; '.join(all_scores[:10])}
+Notes: {notes_text if notes_text else "None"}
+
+Requirements:
+- Start with an overall verdict (recommended/cautious/not recommended)
+- Highlight 1-2 key strengths
+- Flag 1-2 key concerns
+- End with a clear recommendation
+- Be direct and specific
+
+Output the summary directly, no headings."""
+
+        r = requests.post("https://api.deepseek.com/chat/completions",
+            json={"model": "deepseek-chat", "max_tokens": 300,
+                  "messages": [{"role": "user", "content": prompt}]},
+            headers={"Authorization": f"Bearer {api_key}"}, timeout=30)
+        r.raise_for_status()
+        return r.json()["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        return f"AI 总结生成失败，请手动填写。({e})"
+
 def create_viewing_report_pdf(client_name, date_str, address, facing, items_data, remarks, photos):
     """使用 PIL 生成长图并保存为 PDF"""
     try:
@@ -1311,7 +1421,7 @@ def create_contract_analysis_pdf(data: Dict, lang: str = "中文") -> Image.Imag
     # ══ 10. FOOTER ══
     y+=50
     draw.rectangle([(0,y),(W,y+168)], fill=(234,234,242))
-    disc=("本报告仅供参考，不构成法律建议。请在签约前咨询专业英国执业律师。Hao Harbour 不承担法律责任。"
+    disc=("本报告由 AI 辅助生成，仅供参考，不构成法律建议。请在签约前咨询专业英国执业律师。Hao Harbour 不承担法律责任。"
           if is_cn else
           "AI-assisted, for reference only. Not legal advice. Consult a UK solicitor. Hao Harbour accepts no liability.")
     draw_lines(draw,disc,M,y+16,FS,CW,(124,124,138),LH_SM)
@@ -1576,143 +1686,205 @@ if ws:
     # =====================================================================
     # TAB 4 — 🌐 多平台内容包
     with t5:
-        st.subheader("👁️ 专业带看报告生成器 (Pro Viewing Report)")
-        st.info("填写深度测评信息，生成带星级评分的结构化报告及专业 PDF。")
+        st.subheader("👁️ 专业带看报告生成器")
+        st.caption("填写评分 → AI 自动生成各板块总结 → 手动编辑 → 导出 PDF")
 
-        # 1. 基础信息
-        st.markdown("#### 1️⃣ 基本信息")
+        # ── 报告语言 ──
+        vr_lang = st.radio("报告语言", ["中文", "English"], horizontal=True, key="vr_lang")
+
+        # ── 1. 基础信息 ──
+        st.markdown("#### 1. 基础信息")
         vs_c1, vs_c2 = st.columns(2)
-        vs_client = vs_c1.text_input("👤 客户姓名", placeholder="例：王女士", key="vr_client")
-        vs_date = vs_c2.date_input("📅 看房日期", value=datetime.today(), key="vr_date")
-        
-        vs_addr = st.text_input("🏠 房子地址", placeholder="例：Canary Wharf, E14", key="vr_addr")
-        vs_facing = st.text_input("🧭 房屋朝向", placeholder="例：坐北朝南 (South Facing)", key="vr_facing")
-        
-        st.write(f"📌 **固定展示联系方式**: 🟢 WeChat: {VIEWING_CONTACT_WECHAT} | 📞 Contact: {VIEWING_CONTACT_PHONE}")
+        vs_client = vs_c1.text_input("客户姓名", placeholder="例：王女士", key="vr_client")
+        vs_date   = vs_c2.date_input("看房日期", value=datetime.today(), key="vr_date")
+        vs_addr   = st.text_input("房子地址", placeholder="例：Apt 12, Lancaster Building, B4 6LP", key="vr_addr")
+        vc1, vc2 = st.columns(2)
+        vs_facing = vc1.text_input("房屋朝向", placeholder="例：South Facing", key="vr_facing")
+        vs_price  = vc2.text_input("要价 (月租)", placeholder="例：£1,800 pcm", key="vr_price")
 
+        st.caption(f"联系方式将自动显示在报告中: WeChat {VIEWING_CONTACT_WECHAT} | {VIEWING_CONTACT_PHONE}")
         st.markdown("---")
 
-        # 2. 三大核心评估板块
-        st.markdown("#### 2️⃣ 核心评估板块 (1-5 星评分)")
-        
-        sections = {
-            'Interior': '🏠 室内深度评估 (Interior)',
-            'Building': '🏢 大楼管理评估 (Building)',
-            'Neighborhood': '🌳 周边微环境 (Neighborhood)'
+        # ── 2. 三大评估板块 ──
+        st.markdown("#### 2. 核心评估 (1-5星) + AI 板块总结")
+
+        section_meta = {
+            "Interior":     "室内评估 (Interior)",
+            "Building":     "大楼管理 (Building)",
+            "Neighborhood": "周边环境 (Neighborhood)"
         }
-        
-        for section_key, section_label in sections.items():
-            with st.expander(section_label, expanded=True):
-                # 动态增减项目
-                cols = st.columns([4, 3, 1])
-                cols[0].markdown("**项目名称**")
-                cols[1].markdown("**评分 (1-5 星)**")
-                
-                # 获取当前板块的项目
-                current_items = list(st.session_state['viewing_items'][section_key].items())
-                
+
+        for section_key, section_label in section_meta.items():
+            with st.expander(f"**{section_label}**", expanded=True):
+                # ── 评分表 ──
+                current_items = list(st.session_state["viewing_items"][section_key].items())
                 for item_name, score in current_items:
                     r1, r2, r3 = st.columns([4, 3, 1])
                     r1.text(item_name)
-                    # 星级评分选择器
                     new_score = r2.select_slider(
-                        f"Rating for {item_name}",
-                        options=[1, 2, 3, 4, 5],
-                        value=score,
-                        format_func=lambda x: "⭐" * x,
+                        f"Rating {section_key} {item_name}",
+                        options=[1,2,3,4,5], value=score,
+                        format_func=lambda x: "★"*x + "☆"*(5-x),
                         key=f"score_{section_key}_{item_name}",
                         label_visibility="collapsed"
                     )
-                    st.session_state['viewing_items'][section_key][item_name] = new_score
-                    
-                    if r3.button("🗑️", key=f"del_{section_key}_{item_name}"):
-                        del st.session_state['viewing_items'][section_key][item_name]
+                    st.session_state["viewing_items"][section_key][item_name] = new_score
+                    if r3.button("🗑", key=f"del_{section_key}_{item_name}"):
+                        del st.session_state["viewing_items"][section_key][item_name]
                         st.rerun()
-                
+
                 # 添加新项目
-                with st.container():
-                    a1, a2 = st.columns([5, 1])
-                    new_item_name = a1.text_input(f"添加新项目到 {section_key}", key=f"add_input_{section_key}", label_visibility="collapsed", placeholder="输入项目名称...")
-                    if a2.button("➕", key=f"add_btn_{section_key}"):
-                        if new_item_name:
-                            st.session_state['viewing_items'][section_key][new_item_name] = 5
-                            st.rerun()
-                
-                st.session_state['viewing_remarks'][section_key] = st.text_area(f"【{section_key}】额外备注", value=st.session_state['viewing_remarks'][section_key], placeholder="输入该板块的补充说明...", key=f"rem_{section_key}")
+                a1, a2 = st.columns([5,1])
+                new_item = a1.text_input(f"添加项目", key=f"add_input_{section_key}",
+                                          label_visibility="collapsed", placeholder="输入新评估项目...")
+                if a2.button("+ 添加", key=f"add_btn_{section_key}"):
+                    if new_item:
+                        st.session_state["viewing_items"][section_key][new_item] = 5
+                        st.rerun()
+
+                st.markdown("---")
+
+                # ── AI 总结该板块 ──
+                ai_btn_col, _ = st.columns([2, 3])
+                if ai_btn_col.button(f"AI 一键生成{section_label.split('(')[0].strip()}总结",
+                                      key=f"ai_sum_{section_key}", use_container_width=True):
+                    with st.spinner("AI 正在生成..."):
+                        ai_text = ai_viewing_summary(
+                            section_key,
+                            st.session_state["viewing_items"][section_key],
+                            lang=vr_lang
+                        )
+                        st.session_state[f"vr_remark_{section_key}"] = ai_text
+
+                # 备注文本框（可手动编辑，AI 结果也写入这里）
+                default_remark = st.session_state.get(
+                    f"vr_remark_{section_key}",
+                    st.session_state["viewing_remarks"].get(section_key, "")
+                )
+                edited = st.text_area(
+                    f"{section_label} 板块总结/备注（可直接编辑）",
+                    value=default_remark,
+                    height=110,
+                    key=f"rem_edit_{section_key}",
+                    placeholder="点击上方按钮 AI 生成，或直接手动填写..."
+                )
+                # 同步回 session_state
+                st.session_state["viewing_remarks"][section_key] = edited
+                st.session_state[f"vr_remark_{section_key}"] = edited
 
         st.markdown("---")
-        
-        # 3. 照片管理
-        st.markdown("#### 3️⃣ 现场照片管理")
-        uploaded_photos = st.file_uploader("上传现场照片 (支持多选)", type=['png', 'jpg', 'jpeg'], accept_multiple_files=True)
-        if uploaded_photos:
-            # 将新上传的照片合并（避免重复）
-            for up in uploaded_photos:
-                if up not in st.session_state['viewing_photos']:
-                    st.session_state['viewing_photos'].append(up)
 
-        if st.session_state['viewing_photos']:
-            st.write("📸 已上传照片预览:")
+        # ── 3. 现场照片 ──
+        st.markdown("#### 3. 现场照片")
+        uploaded_photos = st.file_uploader("上传照片（支持多选）", type=["png","jpg","jpeg"],
+                                            accept_multiple_files=True, key="vr_photo_upload")
+        if uploaded_photos:
+            for up in uploaded_photos:
+                if up not in st.session_state["viewing_photos"]:
+                    st.session_state["viewing_photos"].append(up)
+
+        if st.session_state["viewing_photos"]:
             pcols = st.columns(4)
-            for i, p in enumerate(st.session_state['viewing_photos']):
+            for i, p in enumerate(st.session_state["viewing_photos"]):
                 with pcols[i % 4]:
                     st.image(p, use_container_width=True)
                     if st.button("删除", key=f"del_photo_{i}"):
-                        st.session_state['viewing_photos'].pop(i)
+                        st.session_state["viewing_photos"].pop(i)
                         st.rerun()
 
         st.markdown("---")
-        
-        # 4. 总体评价与生成
-        st.markdown("#### 4️⃣ 总体评价 & 导出报告")
-        st.session_state['viewing_remarks']['General'] = st.text_area("✍️ 总体评价 (General Remarks)", value=st.session_state['viewing_remarks']['General'], height=100)
-        
-        st.warning(f"📄 **免责声明将自动包含在报告中**:\n{VIEWING_DISCLAIMER}")
 
-        c_g1, c_g2 = st.columns(2)
-        if c_g1.button("📝 生成带看小结 (文字版)", type="primary", use_container_width=True):
-            if not vs_client or not vs_addr:
-                st.error("请至少填写客户姓名和地址")
+        # ── 4. 总体评价 ──
+        st.markdown("#### 4. 总体评价 & 导出")
+
+        ai_general_col, _ = st.columns([2, 3])
+        if ai_general_col.button("AI 一键生成整体总评", key="ai_general_sum",
+                                   use_container_width=True, type="primary"):
+            if not vs_addr:
+                st.warning("请先填写房子地址")
             else:
+                with st.spinner("AI 正在综合分析..."):
+                    ai_gen = ai_general_summary(
+                        vs_client, vs_addr, vs_facing,
+                        st.session_state["viewing_items"],
+                        st.session_state["viewing_remarks"],
+                        lang=vr_lang
+                    )
+                    st.session_state["vr_general_ai"] = ai_gen
+
+        default_general = st.session_state.get(
+            "vr_general_ai",
+            st.session_state["viewing_remarks"].get("General", "")
+        )
+        general_edited = st.text_area(
+            "总体评价（可直接编辑）",
+            value=default_general,
+            height=130,
+            key="vr_general_edit",
+            placeholder="点击上方按钮 AI 生成，或直接手动填写..."
+        )
+        st.session_state["viewing_remarks"]["General"] = general_edited
+        st.session_state["vr_general_ai"] = general_edited
+
+        st.info(f"免责声明（自动附在报告末尾）：{VIEWING_DISCLAIMER[:80]}...")
+
+        st.markdown("---")
+
+        # ── 5. 生成按钮 ──
+        st.markdown("#### 5. 生成报告")
+        if not vs_client or not vs_addr:
+            st.warning("请先填写客户姓名和房子地址")
+        else:
+            b1, b2, b3 = st.columns(3)
+
+            if b1.button("📝 生成文字版小结", use_container_width=True):
                 summary_text = gen_pro_viewing_summary(
                     vs_client, str(vs_date), vs_addr, vs_facing,
-                    st.session_state['viewing_items'],
-                    st.session_state['viewing_remarks']
+                    st.session_state["viewing_items"],
+                    st.session_state["viewing_remarks"]
                 )
-                st.session_state['vr_summary_output'] = summary_text
+                st.session_state["vr_summary_output"] = summary_text
 
-        if c_g2.button("🎨 生成专业 PDF 报告", use_container_width=True):
-            if not vs_client or not vs_addr:
-                st.error("请至少填写客户姓名和地址")
-            else:
-                with st.spinner("正在排版并生成 PDF..."):
+            if b2.button("🎨 生成 PDF 报告", use_container_width=True, type="primary"):
+                with st.spinner("正在排版 PDF..."):
                     pdf_canvas = create_viewing_report_pdf(
                         vs_client, str(vs_date), vs_addr, vs_facing,
-                        st.session_state['viewing_items'],
-                        st.session_state['viewing_remarks'],
-                        st.session_state['viewing_photos']
+                        st.session_state["viewing_items"],
+                        st.session_state["viewing_remarks"],
+                        st.session_state["viewing_photos"]
                     )
-                    st.session_state['vr_pdf_output'] = pdf_canvas
+                    st.session_state["vr_pdf_output"] = pdf_canvas
 
-        if 'vr_summary_output' in st.session_state:
-            st.markdown("### 📄 文字版小结")
-            st.text_area("复制发给客户:", value=st.session_state['vr_summary_output'], height=400)
-        
-        if 'vr_pdf_output' in st.session_state:
-            st.markdown("### 🖼️ PDF 报告预览")
-            st.image(st.session_state['vr_pdf_output'], caption="这就是最终生成的 PDF 布局预览", use_container_width=True)
-            
-            # 提供下载
+            if b3.button("🔄 重置全部评分", use_container_width=True):
+                st.session_state["viewing_items"] = {
+                    "Interior":     {item: 5 for item in VIEWING_DEFAULT_INTERIOR},
+                    "Building":     {item: 5 for item in VIEWING_DEFAULT_BUILDING},
+                    "Neighborhood": {item: 5 for item in VIEWING_DEFAULT_NEIGHBORHOOD}
+                }
+                st.session_state["viewing_remarks"] = {"Interior":"","Building":"","Neighborhood":"","General":""}
+                st.session_state["viewing_photos"] = []
+                for k in ["vr_remark_Interior","vr_remark_Building","vr_remark_Neighborhood","vr_general_ai"]:
+                    st.session_state.pop(k, None)
+                st.rerun()
+
+        # ── 输出展示 ──
+        if "vr_summary_output" in st.session_state:
+            st.markdown("### 文字版小结")
+            st.text_area("复制发给客户:", value=st.session_state["vr_summary_output"], height=400, key="vr_txt_out")
+
+        if "vr_pdf_output" in st.session_state:
+            st.markdown("### PDF 预览")
+            st.image(st.session_state["vr_pdf_output"], use_container_width=True)
             buf_pdf = BytesIO()
-            st.session_state['vr_pdf_output'].save(buf_pdf, format="PDF", resolution=100.0)
+            st.session_state["vr_pdf_output"].save(buf_pdf, format="PDF", resolution=150.0)
             st.download_button(
-                "⬇️ 立即下载 PDF 报告",
+                "⬇️ 下载 PDF 报告",
                 data=buf_pdf.getvalue(),
-                file_name=f"Viewing_Report_{vs_client}_{vs_date}.pdf",
-                mime="application/pdf"
+                file_name=f"Viewing_{vs_client}_{vs_date}.pdf",
+                mime="application/pdf",
+                key="dl_vr_pdf"
             )
 
-    # =====================================================================
     # TAB 7 — 🧰 工具箱（合同深度分析 v4.0 + 爆款关键词）
     # =====================================================================
     with t7:
