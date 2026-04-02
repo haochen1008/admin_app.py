@@ -1445,6 +1445,13 @@ if 'viewing_items' not in st.session_state:
     st.session_state['viewing_remarks'] = {'Interior': '', 'Building': '', 'Neighborhood': '', 'General': ''}
     st.session_state['viewing_photos'] = []
 
+# Initialise text_area widget keys so AI results populate correctly
+for _sec in ['Interior', 'Building', 'Neighborhood']:
+    if f'rem_edit_{_sec}' not in st.session_state:
+        st.session_state[f'rem_edit_{_sec}'] = ''
+if 'vr_general_edit' not in st.session_state:
+    st.session_state['vr_general_edit'] = ''
+
 ws = get_ws()
 if ws:
     t1, t2, t3, t5, t7 = st.tabs([
@@ -1754,23 +1761,20 @@ if ws:
                             st.session_state["viewing_items"][section_key],
                             lang=vr_lang
                         )
-                        st.session_state[f"vr_remark_{section_key}"] = ai_text
+                        # Write directly to the text_area's key so Streamlit picks it up
+                        st.session_state[f"rem_edit_{section_key}"] = ai_text
+                        st.session_state["viewing_remarks"][section_key] = ai_text
+                    st.rerun()
 
                 # 备注文本框（可手动编辑，AI 结果也写入这里）
-                default_remark = st.session_state.get(
-                    f"vr_remark_{section_key}",
-                    st.session_state["viewing_remarks"].get(section_key, "")
-                )
                 edited = st.text_area(
                     f"{section_label} 板块总结/备注（可直接编辑）",
-                    value=default_remark,
-                    height=110,
                     key=f"rem_edit_{section_key}",
+                    height=110,
                     placeholder="点击上方按钮 AI 生成，或直接手动填写..."
                 )
-                # 同步回 session_state
+                # 同步回 viewing_remarks
                 st.session_state["viewing_remarks"][section_key] = edited
-                st.session_state[f"vr_remark_{section_key}"] = edited
 
         st.markdown("---")
 
@@ -1810,21 +1814,18 @@ if ws:
                         st.session_state["viewing_remarks"],
                         lang=vr_lang
                     )
-                    st.session_state["vr_general_ai"] = ai_gen
+                    # Write directly to text_area key
+                    st.session_state["vr_general_edit"] = ai_gen
+                    st.session_state["viewing_remarks"]["General"] = ai_gen
+                st.rerun()
 
-        default_general = st.session_state.get(
-            "vr_general_ai",
-            st.session_state["viewing_remarks"].get("General", "")
-        )
         general_edited = st.text_area(
             "总体评价（可直接编辑）",
-            value=default_general,
-            height=130,
             key="vr_general_edit",
+            height=130,
             placeholder="点击上方按钮 AI 生成，或直接手动填写..."
         )
         st.session_state["viewing_remarks"]["General"] = general_edited
-        st.session_state["vr_general_ai"] = general_edited
 
         st.info(f"免责声明（自动附在报告末尾）：{VIEWING_DISCLAIMER[:80]}...")
 
