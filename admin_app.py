@@ -1687,7 +1687,7 @@ if ws:
                             p_lng = str(scraped_data.get('lng', ''))
                             ai_copy = call_smart_ai(desc_str[:1000]) if desc_str else "最新豪宅首发，欢迎详询！"
                             # 写入数据库
-                                                        current_date = datetime.now().strftime("%Y-%m-%d")
+                            current_date = datetime.now().strftime("%Y-%m-%d")
                             # 改用了 insert_row 并强制指定 index=2，新房子会永远插在最顶部！
                             ws.insert_row([current_date, p_title, final_reg, rooms_val, p_price, img_url_cloud, ai_copy, 0, 0, p_station, "", p_lat, p_lng], index=2) # type: ignore
                             # 清除管理面板可能残留的缓存，让数据立刻刷新
