@@ -1535,7 +1535,7 @@ if ws:
                             p_lat = rm_data.get('lat', '')
                             p_lng = rm_data.get('lng', '')
 
-                            ws.append_row([now, p_name, p_reg, p_rooms, int(p_price), img_url, zh_desc, 0, 0, p_station, "", p_lat, p_lng])
+                            ws.insert_row([now, p_name, p_reg, p_rooms, int(p_price), img_url, zh_desc, 0, 0, p_station, "", p_lat, p_lng], index=2)
                             publish_success = True
                         except Exception as e:
                             publish_error = str(e)
@@ -1687,10 +1687,14 @@ if ws:
                             p_lng = str(scraped_data.get('lng', ''))
                             ai_copy = call_smart_ai(desc_str[:1000]) if desc_str else "最新豪宅首发，欢迎详询！"
                             # 写入数据库
-                            current_date = datetime.now().strftime("%Y-%m-%d")
-                            ws.append_row([current_date, p_title, final_reg, rooms_val, p_price, img_url_cloud, ai_copy, 0, 0, p_station, "", p_lat, p_lng]) # type: ignore
+                                                        current_date = datetime.now().strftime("%Y-%m-%d")
+                            # 改用了 insert_row 并强制指定 index=2，新房子会永远插在最顶部！
+                            ws.insert_row([current_date, p_title, final_reg, rooms_val, p_price, img_url_cloud, ai_copy, 0, 0, p_station, "", p_lat, p_lng], index=2) # type: ignore
+                            # 清除管理面板可能残留的缓存，让数据立刻刷新
+                            st.cache_data.clear() 
                             success_count = success_count + 1
                             st.success(f"✅ [{i+1}] {p_title} ({final_reg}) 发布成功！")
+
                         except Exception as e:
                             st.error(f"❌ [{i+1}] 上传出错: {e}")
                     else:
