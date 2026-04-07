@@ -1519,25 +1519,35 @@ if ws:
             preview_img = create_poster(files_to_use, p_name, p_price, p_rooms, p_reg)
             if preview_img:
                 st.image(preview_img, caption="双水印强化海报预览", width=450)
-                
+
                 if st.button("🚀 立即发布"):
+                    publish_success = False
+                    publish_error = ""
                     with st.spinner("同步云端中..."):
-                        buf = BytesIO()
-                        preview_img.save(buf, format="JPEG", quality=95)
-                        upload_res = cloudinary.uploader.upload(buf.getvalue())
-                        img_url = upload_res['secure_url']
-                        
-                        now = datetime.now().strftime("%Y-%m-%d")
-                        p_station = rm_data.get('station', '')
-                        p_lat = rm_data.get('lat', '')
-                        p_lng = rm_data.get('lng', '')
-                        # Index 10 is reserved for manual walkingMinutes to ensure backward compatibility
                         try:
+                            buf = BytesIO()
+                            preview_img.save(buf, format="JPEG", quality=95)
+                            upload_res = cloudinary.uploader.upload(buf.getvalue())
+                            img_url = upload_res['secure_url']
+
+                            now = datetime.now().strftime("%Y-%m-%d")
+                            p_station = rm_data.get('station', '')
+                            p_lat = rm_data.get('lat', '')
+                            p_lng = rm_data.get('lng', '')
+
                             ws.append_row([now, p_name, p_reg, p_rooms, int(p_price), img_url, zh_desc, 0, 0, p_station, "", p_lat, p_lng])
-                            st.success("发布成功！海报已存档。")
-                            st.rerun()
+                            publish_success = True
                         except Exception as e:
-                            st.error(f"⚠️ 发布失败，Google Sheets 写入出错：{e}")
+                            publish_error = str(e)
+
+                    # rerun MUST be outside spinner — correct Streamlit pattern
+                    if publish_success:
+                        st.success("✅ 发布成功！海报已存档，正在刷新...")
+                        st.session_state.pop('rm_data', None)
+                        st.session_state.pop('zh_content', None)
+                        st.rerun()
+                    else:
+                        st.error(f"⚠️ 发布失败：{publish_error}")
 
     with t2:
         try:
