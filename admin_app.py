@@ -258,7 +258,7 @@ def scrape_rightmove(url):
         if scraper_key:
             proxy_url = f"https://api.scraperapi.com?api_key={scraper_key}&url={clean_url}&render=false&country_code=gb"
             r = requests.get(proxy_url, headers=headers, timeout=30)
-            if r.status_code == 200 and "PAGE_MODEL" in r.text:
+            if r.status_code == 200 and len(r.text) > 500:
                 html = r.text
     except Exception:
         pass
@@ -268,7 +268,7 @@ def scrape_rightmove(url):
         try:
             r = requests.get(clean_url, headers=headers, timeout=15)
             r.raise_for_status()
-            if "PAGE_MODEL" in r.text:
+            if len(r.text) > 500:
                 html = r.text
         except Exception as e:
             return None, (
@@ -277,22 +277,37 @@ def scrape_rightmove(url):
                 f"错误详情: {str(e)[:60]}"
             )
 
-    if not html or "PAGE_MODEL" not in html:
+    if not html:
         return None, (
             "无法获取房源数据。Rightmove 已封锁此服务器。\n"
             "解决方法：在 Streamlit Secrets 中加入 SCRAPER_API_KEY（scraperapi.com 免费1000次/月）"
         )
 
-    # ── 解析 PAGE_MODEL ──
-    try:
-        page_model_raw = html.split("window.PAGE_MODEL = ")[1].strip()
-        data, _ = json.JSONDecoder().raw_decode(page_model_raw)
-        p_data = data.get("propertyData", {})
-    except Exception as e:
-        return None, f"JSON解析失败: {e}"
+    # ── 解析页面数据 —— 兼容多种格式 ──
+    p_data = None
+
+    # 方式1: window.PAGE_MODEL (兼容有无空格的各种写法)
+    m = re.search(r'window\.PAGE_MODEL\s*=\s*', html)
+    if m:
+        try:
+            data, _ = json.JSONDecoder().raw_decode(html[m.end():].strip())
+            p_data = data.get("propertyData", {})
+        except Exception:
+            pass
+
+    # 方式2: __NEXT_DATA__ (Next.js 新版格式)
+    if not p_data:
+        m2 = re.search(r'<script[^>]*id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL)
+        if m2:
+            try:
+                nd = json.loads(m2.group(1))
+                p_data = (nd.get("props", {}).get("pageProps", {}).get("propertyData") or
+                          nd.get("props", {}).get("initialProps", {}).get("propertyData"))
+            except Exception:
+                pass
 
     if not p_data:
-        return None, "无法解析数据，请检查链接是否为房源页"
+        return None, "无法解析数据，请检查链接是否为房源页（Rightmove 可能更新了页面格式）"
 
     raw_title = p_data.get("text", {}).get("pageTitle", "")
     title = raw_title.split(" in ", 1)[-1].strip() if " in " in raw_title else raw_title
