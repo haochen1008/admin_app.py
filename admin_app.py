@@ -230,108 +230,137 @@ def call_smart_ai(text):
     except: return "✓ 解析失败，请手动修改"
 
 def scrape_rightmove(url):
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-GB,en;q=0.9'
-    }
-    try:
-        if not url or "rightmove.co.uk" not in url:
-            return None, "无效的 Rightmove 链接"
-        res = requests.get(url, headers=headers, timeout=15)
-        res.raise_for_status()
-        html = res.text
-        if 'window.PAGE_MODEL = ' in html:
-            page_model_raw = html.split('window.PAGE_MODEL = ')[1].strip()
-            try:
-                data, _ = json.JSONDecoder().raw_decode(page_model_raw)
-                p_data = data.get('propertyData', {})
-            except json.JSONDecodeError as e:
-                return None, f"JSON解析失败: {e}"
-            
-            if p_data:
-                raw_title = p_data.get('text', {}).get('pageTitle', '')
-                if " in " in raw_title:
-                    title = raw_title.split(" in ", 1)[-1].strip()
-                else:
-                    title = raw_title
-                price_str = p_data.get('prices', {}).get('primaryPrice', '')
-                try: price = int(re.sub(r'[^\d]', '', price_str))
-                except: price = 0
-                desc_html = p_data.get('text', {}).get('description', '')
-                desc = re.sub(r'<[^>]+>', '', desc_html).strip()
-                bedrooms = p_data.get('bedrooms', 0)
-                if bedrooms == 0: rooms_str = "Studio"
-                elif bedrooms >= 4: rooms_str = "4房+"
-                else: rooms_str = f"{bedrooms}房"
-                img_data: Any = p_data.get('images', [])
-                images: List[str] = [str(img.get('url')) for img in img_data if isinstance(img, dict) and img.get('url')] if isinstance(img_data, list) else []
-                
-                fp_data: Any = p_data.get('floorplans', [])
-                floorplans: List[str] = [str(fp.get('url')) for fp in fp_data if isinstance(fp, dict) and fp.get('url')] if isinstance(fp_data, list) else []
-                
-                final_images: List[str] = images[:8]
-                if floorplans and len(final_images) >= 7:
-                    final_images = final_images[:7] + [floorplans[0]]
-                elif floorplans:
-                    final_images.append(floorplans[0])
-                
-                # 提取最近的3个地铁/火车站和具体经纬度
-                stations_data = []
-                if 'location' in p_data and 'stations' in p_data['location']:
-                    stations_data = p_data['location']['stations']
-                elif 'stations' in p_data:
-                    stations_data = p_data['stations']
-                
-                nearest_stations = []
-                for s in stations_data[:3]:
-                    if isinstance(s, dict) and s.get('name'):
-                        s_name = s['name']
-                        s_dist = s.get('distance', '')
-                        s_unit = s.get('unit', 'mi')
-                        if s_dist != '':
-                            # Format to 1 decimal place if float
-                            try:
-                                d_val = float(s_dist)
-                                s_dist_fmt = f"{d_val:.1f}"
-                            except ValueError:
-                                s_dist_fmt = str(s_dist)
-                            nearest_stations.append(f"{s_name} ({s_dist_fmt}{s_unit})")
-                        else:
-                            nearest_stations.append(s_name)
-                stations_str = ", ".join(nearest_stations)
-                
-                # Extract exact coordinates for precision mapping
-                lat, lng = "", ""
-                if 'location' in p_data:
-                    lat = p_data['location'].get('latitude', '')
-                    lng = p_data['location'].get('longitude', '')
-                
-                # 智能分区：从房源地址/邮编自动判断伦敦区域
-                address_info: Any = p_data.get('address', {})
-                postcode: str = ""
-                if isinstance(address_info, dict):
-                    postcode = str(address_info.get('outcode', '') or address_info.get('postcode', '') or '')
-                if not postcode:
-                    # 从标题中尝试提取邮编
-                    pc_match = re.search(r'\b([A-Z]{1,2}[0-9]{1,2}[A-Z]?\s?[0-9][A-Z]{2})\b', title.upper())
-                    if pc_match:
-                        postcode = pc_match.group(1)
-                auto_region: str = infer_london_region(postcode)
-                
-                return {
-                    'title': title, 'price': price, 'rooms': rooms_str,
-                    'description': desc, 'images': final_images,
-                    'region': auto_region, 'postcode': postcode,
-                    'station': stations_str,
-                    'lat': lat,
-                    'lng': lng
-                }, None
-        return None, "无法解析数据，请检查链接是否为房源页"
-    except Exception as e:
-        return None, f"抓取失败: {e}"
+    """
+    抓取 Rightmove 房源数据。
+    优先使用 ScraperAPI（住宅IP代理，绕过封锁）；
+    若未配置则回退直连（可能被403）。
+    """
+    if not url or "rightmove.co.uk" not in url:
+        return None, "无效的 Rightmove 链接"
 
-# --- 4. 核心：海报引擎 (仅修改 display_text 拼接) ---
+    m = re.search(r'/properties/(\d+)', url)
+    if not m:
+        return None, "无法从链接中提取房源 ID"
+    property_id = m.group(1)
+    clean_url = f"https://www.rightmove.co.uk/properties/{property_id}"
+
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-GB,en;q=0.9',
+    }
+
+    html = None
+
+    # ── 优先：ScraperAPI 住宅IP代理 ──
+    try:
+        scraper_key = st.secrets.get("SCRAPER_API_KEY", "")
+        if scraper_key:
+            proxy_url = f"https://api.scraperapi.com?api_key={scraper_key}&url={clean_url}&render=false&country_code=gb"
+            r = requests.get(proxy_url, headers=headers, timeout=30)
+            if r.status_code == 200 and "PAGE_MODEL" in r.text:
+                html = r.text
+    except Exception:
+        pass
+
+    # ── 回退：直连 ──
+    if not html:
+        try:
+            r = requests.get(clean_url, headers=headers, timeout=15)
+            r.raise_for_status()
+            if "PAGE_MODEL" in r.text:
+                html = r.text
+        except Exception as e:
+            return None, (
+                f"抓取失败：Rightmove 已封锁云服务器 IP。\n"
+                f"解决方法：在 Streamlit Secrets 中加入 SCRAPER_API_KEY（scraperapi.com 免费1000次/月）。\n"
+                f"错误详情: {str(e)[:60]}"
+            )
+
+    if not html or "PAGE_MODEL" not in html:
+        return None, (
+            "无法获取房源数据。Rightmove 已封锁此服务器。\n"
+            "解决方法：在 Streamlit Secrets 中加入 SCRAPER_API_KEY（scraperapi.com 免费1000次/月）"
+        )
+
+    # ── 解析 PAGE_MODEL ──
+    try:
+        page_model_raw = html.split("window.PAGE_MODEL = ")[1].strip()
+        data, _ = json.JSONDecoder().raw_decode(page_model_raw)
+        p_data = data.get("propertyData", {})
+    except Exception as e:
+        return None, f"JSON解析失败: {e}"
+
+    if not p_data:
+        return None, "无法解析数据，请检查链接是否为房源页"
+
+    raw_title = p_data.get("text", {}).get("pageTitle", "")
+    title = raw_title.split(" in ", 1)[-1].strip() if " in " in raw_title else raw_title
+
+    price_str = p_data.get("prices", {}).get("primaryPrice", "")
+    try:
+        price = int(re.sub(r"[^\d]", "", price_str))
+    except:
+        price = 0
+
+    desc_html = p_data.get("text", {}).get("description", "")
+    desc = re.sub(r"<[^>]+>", "", desc_html).strip()
+
+    bedrooms = p_data.get("bedrooms", 0)
+    if bedrooms == 0:
+        rooms_str = "Studio"
+    elif bedrooms >= 4:
+        rooms_str = "4房+"
+    else:
+        rooms_str = f"{bedrooms}房"
+
+    img_data = p_data.get("images", [])
+    images = [str(img.get("url")) for img in img_data if isinstance(img, dict) and img.get("url")] if isinstance(img_data, list) else []
+    fp_data = p_data.get("floorplans", [])
+    floorplans = [str(fp.get("url")) for fp in fp_data if isinstance(fp, dict) and fp.get("url")] if isinstance(fp_data, list) else []
+    final_images = images[:8]
+    if floorplans and len(final_images) <= 7:
+        final_images = final_images[:7] + [floorplans[0]]
+    elif floorplans:
+        final_images.append(floorplans[0])
+
+    stations_data = p_data.get("location", {}).get("stations", []) or p_data.get("stations", [])
+    nearest_stations = []
+    for s in stations_data[:3]:
+        if isinstance(s, dict) and s.get("name"):
+            s_name = s["name"]
+            s_dist = s.get("distance", "")
+            s_unit = s.get("unit", "mi")
+            if s_dist != "":
+                try:
+                    s_dist_fmt = f"{float(s_dist):.1f}"
+                except:
+                    s_dist_fmt = str(s_dist)
+                nearest_stations.append(f"{s_name} ({s_dist_fmt}{s_unit})")
+            else:
+                nearest_stations.append(s_name)
+    stations_str = ", ".join(nearest_stations)
+
+    lat = p_data.get("location", {}).get("latitude", "")
+    lng = p_data.get("location", {}).get("longitude", "")
+
+    address_info = p_data.get("address", {})
+    postcode = ""
+    if isinstance(address_info, dict):
+        postcode = str(address_info.get("outcode", "") or address_info.get("postcode", "") or "")
+    if not postcode:
+        pc_match = re.search(r'\b([A-Z]{1,2}[0-9]{1,2}[A-Z]?\s[0-9][A-Z]{2})\b', title.upper())
+        if pc_match:
+            postcode = pc_match.group(1)
+    auto_region = infer_london_region(postcode)
+
+    return {
+        "title": title, "price": price, "rooms": rooms_str,
+        "description": desc, "images": final_images,
+        "region": auto_region, "postcode": postcode,
+        "station": stations_str, "lat": lat, "lng": lng
+    }, None
+
 def create_poster(files, title, price, rooms, region="伦敦"):
     try:
         # 1200x2350 高清加长画布 (8宫格)
@@ -1535,7 +1564,7 @@ if ws:
                             p_lat = rm_data.get('lat', '')
                             p_lng = rm_data.get('lng', '')
 
-                            ws.insert_row([now, p_name, p_reg, p_rooms, int(p_price), img_url, zh_desc, 0, 0, p_station, "", p_lat, p_lng], index=2)
+                            ws.append_row([now, p_name, p_reg, p_rooms, int(p_price), img_url, zh_desc, 0, 0, p_station, "", p_lat, p_lng])
                             publish_success = True
                         except Exception as e:
                             publish_error = str(e)
@@ -1688,13 +1717,9 @@ if ws:
                             ai_copy = call_smart_ai(desc_str[:1000]) if desc_str else "最新豪宅首发，欢迎详询！"
                             # 写入数据库
                             current_date = datetime.now().strftime("%Y-%m-%d")
-                            # 改用了 insert_row 并强制指定 index=2，新房子会永远插在最顶部！
-                            ws.insert_row([current_date, p_title, final_reg, rooms_val, p_price, img_url_cloud, ai_copy, 0, 0, p_station, "", p_lat, p_lng], index=2) # type: ignore
-                            # 清除管理面板可能残留的缓存，让数据立刻刷新
-                            st.cache_data.clear() 
+                            ws.append_row([current_date, p_title, final_reg, rooms_val, p_price, img_url_cloud, ai_copy, 0, 0, p_station, "", p_lat, p_lng]) # type: ignore
                             success_count = success_count + 1
                             st.success(f"✅ [{i+1}] {p_title} ({final_reg}) 发布成功！")
-
                         except Exception as e:
                             st.error(f"❌ [{i+1}] 上传出错: {e}")
                     else:
