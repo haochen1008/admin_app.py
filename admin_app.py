@@ -251,31 +251,37 @@ def scrape_rightmove(url):
     }
 
     html = None
+    scrape_debug = ""
 
-    # ── 优先：ScraperAPI 住宅IP代理 ──
+    # ── 优先：ScraperAPI + headless Chrome（render=true，执行JS后获取完整数据）──
     try:
         scraper_key = st.secrets.get("SCRAPER_API_KEY", "")
         if scraper_key:
-            proxy_url = f"https://api.scraperapi.com?api_key={scraper_key}&url={clean_url}&render=false&country_code=gb"
-            r = requests.get(proxy_url, headers=headers, timeout=30)
-            if r.status_code == 200 and len(r.text) > 500:
+            # render=true 使用 headless Chrome 执行 JS，才能拿到动态加载的房源数据
+            proxy_url = f"https://api.scraperapi.com?api_key={scraper_key}&url={clean_url}&render=true&country_code=gb&premium=true"
+            r = requests.get(proxy_url, headers=headers, timeout=60)
+            scrape_debug = f"ScraperAPI: status={r.status_code}, len={len(r.text)}"
+            if r.status_code == 200 and len(r.text) > 1000:
                 html = r.text
-    except Exception:
-        pass
+    except Exception as e:
+        scrape_debug = f"ScraperAPI error: {str(e)[:80]}"
 
-    # ── 回退：直连 ──
+    # ── 回退：直连（云服务器通常被403）──
     if not html:
         try:
             r = requests.get(clean_url, headers=headers, timeout=15)
             r.raise_for_status()
-            if len(r.text) > 500:
+            if len(r.text) > 1000:
                 html = r.text
         except Exception as e:
             return None, (
-                f"抓取失败：Rightmove 已封锁云服务器 IP。\n"
-                f"解决方法：在 Streamlit Secrets 中加入 SCRAPER_API_KEY（scraperapi.com 免费1000次/月）。\n"
-                f"错误详情: {str(e)[:60]}"
+                f"抓取失败：Rightmove 现在需要 JavaScript 渲染，请确认 ScraperAPI Key 已配置且有效。\n"
+                f"调试信息：{scrape_debug}\n"
+                f"直连错误：{str(e)[:60]}"
             )
+
+    if not html:
+        return None, f"抓取失败，页面内容为空。调试信息：{scrape_debug}"
 
     if not html:
         return None, (
@@ -286,7 +292,7 @@ def scrape_rightmove(url):
     # ── 解析页面数据 —— 兼容多种格式 ──
     p_data = None
 
-    # 方式1: window.PAGE_MODEL (兼容有无空格的各种写法)
+    # 方式1: window.PAGE_MODEL (兼容有无空格)
     m = re.search(r'window\.PAGE_MODEL\s*=\s*', html)
     if m:
         try:
@@ -295,19 +301,51 @@ def scrape_rightmove(url):
         except Exception:
             pass
 
-    # 方式2: __NEXT_DATA__ (Next.js 新版格式)
+    # 方式2: __NEXT_DATA__ (Next.js)
     if not p_data:
         m2 = re.search(r'<script[^>]*id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL)
         if m2:
             try:
                 nd = json.loads(m2.group(1))
                 p_data = (nd.get("props", {}).get("pageProps", {}).get("propertyData") or
-                          nd.get("props", {}).get("initialProps", {}).get("propertyData"))
+                          nd.get("props", {}).get("initialProps", {}).get("propertyData") or
+                          nd.get("props", {}).get("pageProps", {}))
+            except Exception:
+                pass
+
+    # 方式3: JSON-LD structured data (rendered pages always have this)
+    if not p_data:
+        for m3 in re.finditer(r'<script[^>]*type="application/ld\+json"[^>]*>(.*?)</script>', html, re.DOTALL):
+            try:
+                ld = json.loads(m3.group(1))
+                if isinstance(ld, list):
+                    ld = ld[0]
+                if ld.get("@type") in ("Residence", "Apartment", "House", "Product"):
+                    # Build a minimal p_data from JSON-LD
+                    p_data = {
+                        "text": {"pageTitle": ld.get("name", ""), "description": ld.get("description", "")},
+                        "prices": {"primaryPrice": ld.get("offers", {}).get("price", "0")},
+                        "address": {"postcode": ld.get("address", {}).get("postalCode", "")},
+                        "images": [{"url": u} for u in ([ld["image"]] if isinstance(ld.get("image"), str) else ld.get("image", []))],
+                    }
+                    break
+            except Exception:
+                pass
+
+    # 方式4: 直接在 HTML 中搜索 propertyData JSON 片段
+    if not p_data:
+        m4 = re.search(r'"propertyData"\s*:\s*(\{)', html)
+        if m4:
+            try:
+                data2, _ = json.JSONDecoder().raw_decode(html[m4.start(1):])
+                p_data = data2
             except Exception:
                 pass
 
     if not p_data:
-        return None, "无法解析数据，请检查链接是否为房源页（Rightmove 可能更新了页面格式）"
+        # Return debug info to help diagnose
+        snippet = html[:500].replace('\n', ' ')
+        return None, f"无法解析数据（页面格式未知）。页面开头：{snippet[:200]}"
 
     raw_title = p_data.get("text", {}).get("pageTitle", "")
     title = raw_title.split(" in ", 1)[-1].strip() if " in " in raw_title else raw_title
