@@ -292,23 +292,31 @@ def scrape_rightmove(url):
     # ── 解析页面数据 —— 兼容多种格式 ──
     p_data = None
 
-    # DEBUG: 临时输出页面关键内容帮助诊断
-    debug_patterns_found = []
-    for pat in ['PAGE_MODEL', '__NEXT_DATA__', 'propertyData', 'bedrooms', 
-                'application/ld+json', 'window.__', 'initialState', 'serverSideProps',
-                'monthlyRent', 'displayPrice', '"price"', 'PAGE_MODEL']:
-        if pat in html:
-            idx = html.find(pat)
-            debug_patterns_found.append(f"{pat}@{idx}: {html[idx:idx+60]}")
-
-    # 方式1: window.PAGE_MODEL (兼容有无空格)
-    m = re.search(r'window\.PAGE_MODEL\s*=\s*', html)
-    if m:
-        try:
-            data, _ = json.JSONDecoder().raw_decode(html[m.end():].strip())
-            p_data = data.get("propertyData", {})
-        except Exception:
-            pass
+    # 方式1: window.__PAGE_MODEL (双下划线，当前Rightmove格式)
+    # 格式: window.__PAGE_MODEL = {"data":"[{\"propertyData\":...}]","metadata":...}
+    for pattern in [r'window\.__PAGE_MODEL\s*=\s*', r'window\.PAGE_MODEL\s*=\s*']:
+        m = re.search(pattern, html)
+        if m:
+            try:
+                outer, _ = json.JSONDecoder().raw_decode(html[m.end():].strip())
+                # data 字段是一个 JSON 字符串，需要二次解析
+                inner_str = outer.get("data", "")
+                if isinstance(inner_str, str) and inner_str:
+                    inner = json.loads(inner_str)
+                    # inner 是一个列表，第一个元素包含 propertyData
+                    if isinstance(inner, list):
+                        for item in inner:
+                            if isinstance(item, dict) and item.get("propertyData"):
+                                p_data = item["propertyData"]
+                                break
+                    elif isinstance(inner, dict):
+                        p_data = inner.get("propertyData", inner)
+                elif isinstance(outer.get("propertyData"), dict):
+                    p_data = outer["propertyData"]
+                if p_data:
+                    break
+            except Exception:
+                pass
 
     # 方式2: __NEXT_DATA__ (Next.js)
     if not p_data:
@@ -349,39 +357,50 @@ def scrape_rightmove(url):
             except Exception:
                 pass
 
-    # 方式5: 搜索所有 window.* 变量
     if not p_data:
-        for wm in re.finditer(r'window\.(\w+)\s*=\s*(\{)', html):
-            var_name = wm.group(1)
-            if var_name in ('PAGE_MODEL', 'serverSideProps', 'initialState', 'digitalData'):
-                try:
-                    data3, _ = json.JSONDecoder().raw_decode(html[wm.start(2):])
-                    candidate = data3.get("propertyData") or data3.get("property") or data3
-                    if candidate and isinstance(candidate, dict):
-                        p_data = candidate
-                        break
-                except Exception:
-                    pass
-
-    if not p_data:
-        debug_info = " | ".join(debug_patterns_found[:5]) if debug_patterns_found else "无匹配模式"
-        # Also show all <script> tags with window. assignments
         script_vars = re.findall(r'window\.(\w+)\s*=', html)
-        return None, f"无法解析数据。页面已抓到（{len(html)}字节），但找不到房源数据。\n调试: {debug_info}\n页面中的window变量: {list(set(script_vars))[:10]}"
+        return None, f"无法解析数据。调试：window变量={list(set(script_vars))[:10]}, 页面大小={len(html)}字节"
 
-    raw_title = p_data.get("text", {}).get("pageTitle", "")
+    # ── 提取字段（兼容新旧两种数据结构）──
+    def _get(d, *paths, default=""):
+        """Try multiple dot-path keys, return first non-empty value."""
+        for path in paths:
+            cur = d
+            for key in path.split("."):
+                if isinstance(cur, dict):
+                    cur = cur.get(key)
+                elif isinstance(cur, list) and cur:
+                    cur = cur[0].get(key) if isinstance(cur[0], dict) else None
+                else:
+                    cur = None
+                if cur is None:
+                    break
+            if cur not in (None, "", [], {}):
+                return cur
+        return default
+
+    # Title — try multiple paths
+    raw_title = _get(p_data, "text.pageTitle", "address.displayAddress", "summary.title", default="")
     title = raw_title.split(" in ", 1)[-1].strip() if " in " in raw_title else raw_title
 
-    price_str = p_data.get("prices", {}).get("primaryPrice", "")
+    # Price
+    price_str = _get(p_data, "prices.primaryPrice", "price.displayPrice",
+                     "listingUpdate.listingUpdateReason", "displayPrice", default="0")
     try:
-        price = int(re.sub(r"[^\d]", "", price_str))
+        price = int(re.sub(r"[^\d]", "", str(price_str)))
     except:
         price = 0
 
-    desc_html = p_data.get("text", {}).get("description", "")
-    desc = re.sub(r"<[^>]+>", "", desc_html).strip()
+    # Description
+    desc_html = _get(p_data, "text.description", "summary.description", "description", default="")
+    desc = re.sub(r"<[^>]+>", "", str(desc_html)).strip()
 
-    bedrooms = p_data.get("bedrooms", 0)
+    # Bedrooms
+    bedrooms = p_data.get("bedrooms") or p_data.get("bedroom") or 0
+    try:
+        bedrooms = int(bedrooms)
+    except:
+        bedrooms = 0
     if bedrooms == 0:
         rooms_str = "Studio"
     elif bedrooms >= 4:
@@ -389,40 +408,52 @@ def scrape_rightmove(url):
     else:
         rooms_str = f"{bedrooms}房"
 
-    img_data = p_data.get("images", [])
-    images = [str(img.get("url")) for img in img_data if isinstance(img, dict) and img.get("url")] if isinstance(img_data, list) else []
-    fp_data = p_data.get("floorplans", [])
-    floorplans = [str(fp.get("url")) for fp in fp_data if isinstance(fp, dict) and fp.get("url")] if isinstance(fp_data, list) else []
-    final_images = images[:8]
-    if floorplans and len(final_images) <= 7:
-        final_images = final_images[:7] + [floorplans[0]]
-    elif floorplans:
-        final_images.append(floorplans[0])
+    # Images — handle both list-of-dicts and list-of-strings
+    img_data = p_data.get("images") or p_data.get("propertyImages", {}).get("images", []) or []
+    images = []
+    for img in img_data:
+        if isinstance(img, dict):
+            url = img.get("url") or img.get("srcUrl") or img.get("src") or ""
+            if url: images.append(str(url))
+        elif isinstance(img, str) and img:
+            images.append(img)
+    images = images[:8]
 
-    stations_data = p_data.get("location", {}).get("stations", []) or p_data.get("stations", [])
+    fp_data = p_data.get("floorplans") or p_data.get("floorplanImages") or []
+    floorplans = []
+    for fp in fp_data:
+        if isinstance(fp, dict):
+            url = fp.get("url") or fp.get("srcUrl") or ""
+            if url: floorplans.append(str(url))
+    if floorplans and len(images) <= 7:
+        images = images[:7] + [floorplans[0]]
+
+    # Stations
+    stations_data = (p_data.get("location", {}).get("stations") or
+                     p_data.get("nearestStations") or
+                     p_data.get("stations") or [])
     nearest_stations = []
     for s in stations_data[:3]:
         if isinstance(s, dict) and s.get("name"):
             s_name = s["name"]
             s_dist = s.get("distance", "")
             s_unit = s.get("unit", "mi")
-            if s_dist != "":
-                try:
-                    s_dist_fmt = f"{float(s_dist):.1f}"
-                except:
-                    s_dist_fmt = str(s_dist)
-                nearest_stations.append(f"{s_name} ({s_dist_fmt}{s_unit})")
-            else:
+            try:
+                nearest_stations.append(f"{s_name} ({float(s_dist):.1f}{s_unit})")
+            except:
                 nearest_stations.append(s_name)
     stations_str = ", ".join(nearest_stations)
 
-    lat = p_data.get("location", {}).get("latitude", "")
-    lng = p_data.get("location", {}).get("longitude", "")
+    # Coordinates
+    lat = _get(p_data, "location.latitude", "latitude", default="")
+    lng = _get(p_data, "location.longitude", "longitude", default="")
 
-    address_info = p_data.get("address", {})
+    # Postcode
+    address_info = p_data.get("address") or {}
     postcode = ""
     if isinstance(address_info, dict):
-        postcode = str(address_info.get("outcode", "") or address_info.get("postcode", "") or "")
+        postcode = str(address_info.get("outcode") or address_info.get("postcode") or
+                      address_info.get("postalCode") or "")
     if not postcode:
         pc_match = re.search(r'\b([A-Z]{1,2}[0-9]{1,2}[A-Z]?\s[0-9][A-Z]{2})\b', title.upper())
         if pc_match:
@@ -431,7 +462,7 @@ def scrape_rightmove(url):
 
     return {
         "title": title, "price": price, "rooms": rooms_str,
-        "description": desc, "images": final_images,
+        "description": desc, "images": images,
         "region": auto_region, "postcode": postcode,
         "station": stations_str, "lat": lat, "lng": lng
     }, None
