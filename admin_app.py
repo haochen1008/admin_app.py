@@ -292,6 +292,15 @@ def scrape_rightmove(url):
     # ── 解析页面数据 —— 兼容多种格式 ──
     p_data = None
 
+    # DEBUG: 临时输出页面关键内容帮助诊断
+    debug_patterns_found = []
+    for pat in ['PAGE_MODEL', '__NEXT_DATA__', 'propertyData', 'bedrooms', 
+                'application/ld+json', 'window.__', 'initialState', 'serverSideProps',
+                'monthlyRent', 'displayPrice', '"price"', 'PAGE_MODEL']:
+        if pat in html:
+            idx = html.find(pat)
+            debug_patterns_found.append(f"{pat}@{idx}: {html[idx:idx+60]}")
+
     # 方式1: window.PAGE_MODEL (兼容有无空格)
     m = re.search(r'window\.PAGE_MODEL\s*=\s*', html)
     if m:
@@ -313,18 +322,16 @@ def scrape_rightmove(url):
             except Exception:
                 pass
 
-    # 方式3: JSON-LD structured data (rendered pages always have this)
+    # 方式3: JSON-LD structured data
     if not p_data:
         for m3 in re.finditer(r'<script[^>]*type="application/ld\+json"[^>]*>(.*?)</script>', html, re.DOTALL):
             try:
                 ld = json.loads(m3.group(1))
-                if isinstance(ld, list):
-                    ld = ld[0]
-                if ld.get("@type") in ("Residence", "Apartment", "House", "Product"):
-                    # Build a minimal p_data from JSON-LD
+                if isinstance(ld, list): ld = ld[0]
+                if ld.get("@type") in ("Residence", "Apartment", "House", "Product", "RealEstateListing"):
                     p_data = {
                         "text": {"pageTitle": ld.get("name", ""), "description": ld.get("description", "")},
-                        "prices": {"primaryPrice": ld.get("offers", {}).get("price", "0")},
+                        "prices": {"primaryPrice": str(ld.get("offers", {}).get("price", "0"))},
                         "address": {"postcode": ld.get("address", {}).get("postalCode", "")},
                         "images": [{"url": u} for u in ([ld["image"]] if isinstance(ld.get("image"), str) else ld.get("image", []))],
                     }
@@ -332,7 +339,7 @@ def scrape_rightmove(url):
             except Exception:
                 pass
 
-    # 方式4: 直接在 HTML 中搜索 propertyData JSON 片段
+    # 方式4: 直接搜索 propertyData JSON
     if not p_data:
         m4 = re.search(r'"propertyData"\s*:\s*(\{)', html)
         if m4:
@@ -342,10 +349,25 @@ def scrape_rightmove(url):
             except Exception:
                 pass
 
+    # 方式5: 搜索所有 window.* 变量
     if not p_data:
-        # Return debug info to help diagnose
-        snippet = html[:500].replace('\n', ' ')
-        return None, f"无法解析数据（页面格式未知）。页面开头：{snippet[:200]}"
+        for wm in re.finditer(r'window\.(\w+)\s*=\s*(\{)', html):
+            var_name = wm.group(1)
+            if var_name in ('PAGE_MODEL', 'serverSideProps', 'initialState', 'digitalData'):
+                try:
+                    data3, _ = json.JSONDecoder().raw_decode(html[wm.start(2):])
+                    candidate = data3.get("propertyData") or data3.get("property") or data3
+                    if candidate and isinstance(candidate, dict):
+                        p_data = candidate
+                        break
+                except Exception:
+                    pass
+
+    if not p_data:
+        debug_info = " | ".join(debug_patterns_found[:5]) if debug_patterns_found else "无匹配模式"
+        # Also show all <script> tags with window. assignments
+        script_vars = re.findall(r'window\.(\w+)\s*=', html)
+        return None, f"无法解析数据。页面已抓到（{len(html)}字节），但找不到房源数据。\n调试: {debug_info}\n页面中的window变量: {list(set(script_vars))[:10]}"
 
     raw_title = p_data.get("text", {}).get("pageTitle", "")
     title = raw_title.split(" in ", 1)[-1].strip() if " in " in raw_title else raw_title
