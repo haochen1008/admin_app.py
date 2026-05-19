@@ -293,28 +293,47 @@ def scrape_rightmove(url):
     p_data = None
 
     # 方式1: window.__PAGE_MODEL (双下划线，当前Rightmove格式)
-    # 格式: window.__PAGE_MODEL = {"data":"[{\"propertyData\":...}]","metadata":...}
+    # 格式: {"data":"[{"propertyData":INDEX,...},{...},{INDEX的实际数据...}]"}
+    # propertyData 的值是一个整数索引，指向 inner 列表中真正的数据对象
     for pattern in [r'window\.__PAGE_MODEL\s*=\s*', r'window\.PAGE_MODEL\s*=\s*']:
         m = re.search(pattern, html)
         if m:
             try:
                 outer, _ = json.JSONDecoder().raw_decode(html[m.end():].strip())
-                # data 字段是一个 JSON 字符串，需要二次解析
                 inner_str = outer.get("data", "")
                 if isinstance(inner_str, str) and inner_str:
                     inner = json.loads(inner_str)
-                    # inner 是一个列表，第一个元素包含 propertyData
                     if isinstance(inner, list):
+                        # Step 1: find the object that has "propertyData" key
+                        pd_index = None
                         for item in inner:
-                            if isinstance(item, dict) and item.get("propertyData"):
-                                p_data = item["propertyData"]
+                            if not isinstance(item, dict): continue
+                            val = item.get("propertyData")
+                            if isinstance(val, dict) and val:
+                                p_data = val   # already the real dict
                                 break
+                            elif isinstance(val, int):
+                                pd_index = val  # it's an index into inner[]
+                        # Step 2: if it was an index, look up inner[index]
+                        if not p_data and pd_index is not None:
+                            if 0 <= pd_index < len(inner) and isinstance(inner[pd_index], dict):
+                                p_data = inner[pd_index]
+                        # Step 3: fallback — find first dict with property-like keys
+                        if not p_data:
+                            for item in inner:
+                                if isinstance(item, dict) and any(
+                                    k in item for k in ("bedrooms", "prices", "address", "text", "images", "displayPrice")
+                                ):
+                                    p_data = item
+                                    break
                     elif isinstance(inner, dict):
-                        p_data = inner.get("propertyData", inner)
+                        p_data = inner.get("propertyData") if isinstance(inner.get("propertyData"), dict) else inner
                 elif isinstance(outer.get("propertyData"), dict):
                     p_data = outer["propertyData"]
-                if p_data:
+                if p_data and isinstance(p_data, dict):
                     break
+                else:
+                    p_data = None
             except Exception:
                 pass
 
