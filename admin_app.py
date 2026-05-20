@@ -380,99 +380,111 @@ def scrape_rightmove(url):
         script_vars = re.findall(r'window\.(\w+)\s*=', html)
         return None, f"无法解析数据。调试：window变量={list(set(script_vars))[:10]}, 页面大小={len(html)}字节"
 
-    # ── 提取字段（兼容新旧两种数据结构）──
-    def _get(d, *paths, default=""):
-        """Try multiple dot-path keys, return first non-empty value."""
-        for path in paths:
-            cur = d
-            for key in path.split("."):
-                if isinstance(cur, dict):
-                    cur = cur.get(key)
-                elif isinstance(cur, list) and cur:
-                    cur = cur[0].get(key) if isinstance(cur[0], dict) else None
-                else:
-                    cur = None
-                if cur is None:
-                    break
-            if cur not in (None, "", [], {}):
-                return cur
-        return default
+    # ── 提取字段 ──
+    # Rightmove __PAGE_MODEL 使用索引压缩：字段值可能是整数（指向 inner[] 的索引）
+    _inner_list = inner if isinstance(inner, list) else []
 
-    # Title — try multiple paths
-    raw_title = _get(p_data, "text.pageTitle", "address.displayAddress", "summary.title", default="")
+    def _deref(val):
+        if isinstance(val, int) and 0 <= val < len(_inner_list):
+            return _inner_list[val]
+        return val
+
+    def _safe_get(d, *keys, default=None):
+        cur = d
+        for k in keys:
+            if not isinstance(cur, dict):
+                return default
+            cur = _deref(cur.get(k))
+            if cur is None:
+                return default
+        return cur if cur is not None else default
+
+    def _safe_list(d, *keys):
+        val = _safe_get(d, *keys, default=[])
+        val = _deref(val)
+        if isinstance(val, list):
+            return [_deref(v) for v in val]
+        return []
+
+    def _safe_str(d, *keys, default=""):
+        val = _safe_get(d, *keys, default=default)
+        val = _deref(val)
+        return str(val) if val not in (None, "") else default
+
+    # Title
+    raw_title = (_safe_str(p_data, "text", "pageTitle") or
+                 _safe_str(p_data, "address", "displayAddress") or "")
     title = raw_title.split(" in ", 1)[-1].strip() if " in " in raw_title else raw_title
 
     # Price
-    price_str = _get(p_data, "prices.primaryPrice", "price.displayPrice",
-                     "listingUpdate.listingUpdateReason", "displayPrice", default="0")
+    price_str = (_safe_str(p_data, "prices", "primaryPrice") or
+                 _safe_str(p_data, "price", "displayPrice") or "0")
     try:
         price = int(re.sub(r"[^\d]", "", str(price_str)))
     except:
         price = 0
 
     # Description
-    desc_html = _get(p_data, "text.description", "summary.description", "description", default="")
-    desc = re.sub(r"<[^>]+>", "", str(desc_html)).strip()
+    desc_html = (_safe_str(p_data, "text", "description") or
+                 _safe_str(p_data, "summary", "description") or "")
+    desc = re.sub(r"<[^>]+>", "", desc_html).strip()
 
     # Bedrooms
-    bedrooms = p_data.get("bedrooms") or p_data.get("bedroom") or 0
+    bedrooms = _deref(p_data.get("bedrooms") or p_data.get("bedroom") or 0)
     try:
         bedrooms = int(bedrooms)
     except:
         bedrooms = 0
-    if bedrooms == 0:
-        rooms_str = "Studio"
-    elif bedrooms >= 4:
-        rooms_str = "4房+"
-    else:
-        rooms_str = f"{bedrooms}房"
+    rooms_str = "Studio" if bedrooms == 0 else ("4房+" if bedrooms >= 4 else f"{bedrooms}房")
 
-    # Images — handle both list-of-dicts and list-of-strings
-    img_data = p_data.get("images") or p_data.get("propertyImages", {}).get("images", []) or []
+    # Images
+    img_data = (_safe_list(p_data, "images") or
+                _safe_list(p_data, "propertyImages", "images") or [])
     images = []
     for img in img_data:
+        img = _deref(img)
         if isinstance(img, dict):
             url = img.get("url") or img.get("srcUrl") or img.get("src") or ""
             if url: images.append(str(url))
         elif isinstance(img, str) and img:
             images.append(img)
     images = images[:8]
-
-    fp_data = p_data.get("floorplans") or p_data.get("floorplanImages") or []
-    floorplans = []
-    for fp in fp_data:
+    for fp in (_safe_list(p_data, "floorplans") or _safe_list(p_data, "floorplanImages") or []):
+        fp = _deref(fp)
         if isinstance(fp, dict):
             url = fp.get("url") or fp.get("srcUrl") or ""
-            if url: floorplans.append(str(url))
-    if floorplans and len(images) <= 7:
-        images = images[:7] + [floorplans[0]]
+            if url and len(images) < 9:
+                images.append(str(url))
+                break
 
     # Stations
-    stations_data = (p_data.get("location", {}).get("stations") or
-                     p_data.get("nearestStations") or
-                     p_data.get("stations") or [])
+    stations_raw = (_safe_list(p_data, "location", "stations") or
+                    _safe_list(p_data, "nearestStations") or
+                    _safe_list(p_data, "stations") or [])
     nearest_stations = []
-    for s in stations_data[:3]:
+    for s in stations_raw[:3]:
+        s = _deref(s)
         if isinstance(s, dict) and s.get("name"):
-            s_name = s["name"]
-            s_dist = s.get("distance", "")
-            s_unit = s.get("unit", "mi")
+            name = _deref(s["name"])
+            dist = _deref(s.get("distance", ""))
+            unit = _deref(s.get("unit", "mi"))
             try:
-                nearest_stations.append(f"{s_name} ({float(s_dist):.1f}{s_unit})")
+                nearest_stations.append(f"{name} ({float(dist):.1f}{unit})")
             except:
-                nearest_stations.append(s_name)
+                nearest_stations.append(str(name))
     stations_str = ", ".join(nearest_stations)
 
     # Coordinates
-    lat = _get(p_data, "location.latitude", "latitude", default="")
-    lng = _get(p_data, "location.longitude", "longitude", default="")
+    loc_dict = _deref(p_data.get("location") or {})
+    lat = str(_deref(loc_dict.get("latitude", "")) if isinstance(loc_dict, dict) else "")
+    lng = str(_deref(loc_dict.get("longitude", "")) if isinstance(loc_dict, dict) else "")
 
     # Postcode
-    address_info = p_data.get("address") or {}
+    addr = _deref(p_data.get("address") or {})
     postcode = ""
-    if isinstance(address_info, dict):
-        postcode = str(address_info.get("outcode") or address_info.get("postcode") or
-                      address_info.get("postalCode") or "")
+    if isinstance(addr, dict):
+        postcode = str(_deref(addr.get("outcode") or addr.get("postcode") or
+                              addr.get("postalCode") or "") or "")
     if not postcode:
         pc_match = re.search(r'\b([A-Z]{1,2}[0-9]{1,2}[A-Z]?\s[0-9][A-Z]{2})\b', title.upper())
         if pc_match:
