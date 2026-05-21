@@ -437,24 +437,58 @@ def scrape_rightmove(url):
         bedrooms = 0
     rooms_str = "Studio" if bedrooms == 0 else ("4房+" if bedrooms >= 4 else f"{bedrooms}房")
 
-    # Images
-    img_data = (_safe_list(p_data, "images") or
-                _safe_list(p_data, "propertyImages", "images") or [])
+    # Images — Rightmove stores images as a list somewhere in inner_list
+    # Strategy: try named paths first, then scan ALL of inner_list
     images = []
-    for img in img_data:
-        img = _deref(img)
-        if isinstance(img, dict):
-            url = img.get("url") or img.get("srcUrl") or img.get("src") or ""
-            if url: images.append(str(url))
-        elif isinstance(img, str) and img:
-            images.append(img)
-    images = images[:8]
+
+    def _extract_urls_from(obj, limit=8):
+        """Recursively extract image URLs from any object."""
+        found = []
+        if isinstance(obj, list):
+            for item in obj:
+                item = _deref(item)
+                found.extend(_extract_urls_from(item, limit))
+                if len(found) >= limit: break
+        elif isinstance(obj, dict):
+            url = obj.get("url") or obj.get("srcUrl") or obj.get("src") or obj.get("imageUrl") or ""
+            url = _deref(url)
+            if isinstance(url, str) and url.startswith("http"):
+                found.append(url)
+        elif isinstance(obj, str) and obj.startswith("http") and any(
+            x in obj.lower() for x in [".jpg", ".jpeg", ".png", ".webp", "media.rightmove", "rightmove"]
+        ):
+            found.append(obj)
+        return found[:limit]
+
+    # Try standard paths first
+    for path_keys in [("images",), ("propertyImages", "images"), ("media", "images")]:
+        img_data = _safe_list(p_data, *path_keys)
+        if img_data:
+            images = _extract_urls_from(img_data)
+            if images: break
+
+    # If still nothing, scan ALL items in inner_list for image-like content
+    if not images:
+        for item in _inner_list:
+            item = _deref(item)
+            candidates = _extract_urls_from(item)
+            if len(candidates) >= 2:  # real image lists have multiple items
+                images = candidates
+                break
+            elif len(candidates) == 1:
+                images.extend(candidates)
+
+    # Deduplicate and limit
+    seen = set()
+    images = [u for u in images if u not in seen and not seen.add(u)][:8]
+
+    # Floorplans
     for fp in (_safe_list(p_data, "floorplans") or _safe_list(p_data, "floorplanImages") or []):
         fp = _deref(fp)
         if isinstance(fp, dict):
-            url = fp.get("url") or fp.get("srcUrl") or ""
-            if url and len(images) < 9:
-                images.append(str(url))
+            url = _deref(fp.get("url") or fp.get("srcUrl") or "")
+            if isinstance(url, str) and url and len(images) < 9:
+                images.append(url)
                 break
 
     # Stations
