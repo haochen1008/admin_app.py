@@ -1735,7 +1735,11 @@ if ws:
                             p_lat = rm_data.get('lat', '')
                             p_lng = rm_data.get('lng', '')
 
-                            ws.append_row([now, p_name, p_reg, p_rooms, int(p_price), img_url, zh_desc, 0, 0, p_station, "", p_lat, p_lng])
+                            ws.append_row(
+                                [now, p_name, p_reg, p_rooms, int(p_price), img_url, zh_desc, 0, 0, p_station, "", p_lat, p_lng],
+                                value_input_option="USER_ENTERED",
+                                table_range="A1"
+                            )
                             publish_success = True
                         except Exception as e:
                             publish_error = str(e)
@@ -1888,7 +1892,11 @@ if ws:
                             ai_copy = call_smart_ai(desc_str[:1000]) if desc_str else "最新豪宅首发，欢迎详询！"
                             # 写入数据库
                             current_date = datetime.now().strftime("%Y-%m-%d")
-                            ws.append_row([current_date, p_title, final_reg, rooms_val, p_price, img_url_cloud, ai_copy, 0, 0, p_station, "", p_lat, p_lng]) # type: ignore
+                            ws.append_row(
+                                [current_date, p_title, final_reg, rooms_val, p_price, img_url_cloud, ai_copy, 0, 0, p_station, "", p_lat, p_lng],
+                                value_input_option="USER_ENTERED",
+                                table_range="A1"
+                            ) # type: ignore
                             success_count = success_count + 1
                             st.success(f"✅ [{i+1}] {p_title} ({final_reg}) 发布成功！")
                         except Exception as e:
