@@ -31,8 +31,8 @@ EXPECTED_HEADERS = ["date", "title", "region", "rooms", "price",
                     "poster-link", "description", "views", "is_featured",
                     "station", "walkingMinutes", "lat", "lng"]
 
-@st.cache_resource(ttl=60)   # 缓存连接60秒，新房源最多60秒后自动出现
-def get_worksheet():
+def _get_worksheet():
+    """建立 Google Sheets 连接（不缓存，每次调用都是新鲜连接）。"""
     try:
         creds_dict = dict(st.secrets["gcp_service_account"])
         if "private_key" in creds_dict:
@@ -49,22 +49,20 @@ def get_worksheet():
         st.error(f"数据库连接失败: {e}")
         return None
 
-def get_data():
-    """安全读取 Google Sheet，兼容空列标题。"""
-    ws = get_worksheet()
+@st.cache_data(ttl=30, show_spinner=False)   # 缓存数据30秒，新房源最多30秒后自动出现
+def _fetch_records():
+    """读取 Sheet 所有数据，结果缓存30秒。"""
+    ws = _get_worksheet()
     if ws is None:
-        return pd.DataFrame(), None
+        return []
     try:
-        # 优先：用 expected_headers 跳过空列
-        records = ws.get_all_records(expected_headers=EXPECTED_HEADERS)
-        return pd.DataFrame(records), ws
+        return ws.get_all_records(expected_headers=EXPECTED_HEADERS)
     except Exception:
         pass
     try:
-        # 回退：手动解析 raw values
         all_values = ws.get_all_values()
         if not all_values:
-            return pd.DataFrame(), ws
+            return []
         raw_headers = all_values[0]
         col_indices = []
         seen = set()
@@ -77,10 +75,18 @@ def get_data():
             record = {h: (row[idx] if idx < len(row) else "") for idx, h in col_indices}
             if any(v for v in record.values()):
                 records.append(record)
-        return pd.DataFrame(records), ws
+        return records
     except Exception as e:
         st.error(f"读取房源数据失败: {e}")
+        return []
+
+def get_data():
+    """返回 (DataFrame, worksheet)。worksheet 用于写浏览量。"""
+    records = _fetch_records()
+    ws = _get_worksheet()   # 用于写操作（update_cell）
+    if not records:
         return pd.DataFrame(), ws
+    return pd.DataFrame(records), ws
 
 # --- 3. 详情弹窗 ---
 @st.dialog("Property Details")
@@ -152,6 +158,12 @@ def show_details(item, ws, row_idx, df=None):
 # --- 4. 主程序 ---
 st.markdown("<h1 style='text-align:center; color:#1a1a1a; font-family:serif; font-size:42px;'>HAO HARBOUR</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align:center; color:#bfa064; letter-spacing:5px; font-size:12px;'>EXCLUSIVE LONDON LIVING</p>", unsafe_allow_html=True)
+
+# 手动刷新按钮（强制清除缓存，立刻获取最新房源）
+col_refresh, _ = st.columns([1, 5])
+if col_refresh.button("🔄 刷新房源", help="点击立刻获取最新房源"):
+    st.cache_data.clear()
+    st.rerun()
 
 df, worksheet = get_data()
 
